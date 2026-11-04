@@ -10,6 +10,9 @@ tích hợp REST trên emulator đạt. Test emulator được skip trong test t
 chạy riêng qua script trong security/README.md. Windows release đã build và mở
 được cửa sổ tổng quan; gói mới là `dist/VLXD-Bay-Hai-Windows-0.2-dev.zip`.
 Chưa kiểm chứng thao tác in thật.
+Web và APK 0.2 đã build lại thành công. APK thử nghiệm ký bằng debug key,
+được sao chép tới `dist/VLXD-Bay-Hai-Android-0.2-dev.apk`. Chưa cài/chạy trên
+Android hoặc iPhone thật. Gói Windows 0.2 chứa đủ DLL của máy in và SQLite.
 
 Đã thêm schema 4 và migration giữ lại catalog/đơn nháp/outbox bản 1. Có bảng
 business records, command receipts, business events, checkpoint/inbox và print jobs.
