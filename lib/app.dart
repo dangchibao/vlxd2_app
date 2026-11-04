@@ -1,0 +1,804 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
+import 'package:uuid/uuid.dart';
+
+import 'data/database.dart';
+import 'domain/sale.dart';
+
+final databaseProvider = Provider<AppDatabase>((ref) {
+  final db = AppDatabase();
+  ref.onDispose(db.close);
+  return db;
+});
+final productsProvider = StreamProvider(
+  (ref) => ref.watch(databaseProvider).watchProducts(),
+);
+final draftsProvider = StreamProvider(
+  (ref) => ref.watch(databaseProvider).watchDrafts(),
+);
+final queueProvider = StreamProvider(
+  (ref) => ref.watch(databaseProvider).watchQueue(),
+);
+String money(int value) =>
+    '${NumberFormat.decimalPattern('vi').format(value)} đ';
+final router = GoRouter(
+  routes: [GoRoute(path: '/', builder: (_, _) => const Workspace())],
+);
+
+class BayHaiApp extends StatelessWidget {
+  const BayHaiApp({super.key});
+  @override
+  Widget build(BuildContext context) => MaterialApp.router(
+    title: 'VLXD Bảy Hải',
+    debugShowCheckedModeBanner: false,
+    routerConfig: router,
+    theme: ThemeData(
+      colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff0059df)),
+      scaffoldBackgroundColor: const Color(0xfff2f6fd),
+      useMaterial3: true,
+      inputDecorationTheme: const InputDecorationTheme(
+        border: OutlineInputBorder(),
+        isDense: true,
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        ),
+      ),
+    ),
+  );
+}
+
+class Workspace extends ConsumerStatefulWidget {
+  const Workspace({super.key});
+  @override
+  ConsumerState<Workspace> createState() => _WorkspaceState();
+}
+
+class _WorkspaceState extends ConsumerState<Workspace> {
+  int page = 0;
+  final labels = ['Tổng quan', 'Hàng hóa', 'Bán hàng', 'Đơn đã lưu', 'Đồng bộ'];
+  final icons = [
+    Icons.dashboard_outlined,
+    Icons.inventory_2_outlined,
+    Icons.shopping_cart_outlined,
+    Icons.receipt_long_outlined,
+    Icons.sync,
+  ];
+  @override
+  Widget build(BuildContext context) {
+    final content = IndexedStack(
+      index: page,
+      children: const [
+        Overview(),
+        Catalog(),
+        SaleEditor(),
+        DraftList(),
+        QueueView(),
+      ],
+    );
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: const Color(0xff0055d9),
+        foregroundColor: Colors.white,
+        title: const Text(
+          'VLXD Bảy Hải',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        actions: const [
+          Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('Cục bộ • Chưa kết nối Firebase'),
+          ),
+        ],
+      ),
+      body: LayoutBuilder(
+        builder: (context, size) => Row(
+          children: [
+            if (size.maxWidth >= 800)
+              SizedBox(
+                width: 205,
+                child: Column(
+                  children: [
+                    const SizedBox(height: 24),
+                    for (var i = 0; i < labels.length; i++)
+                      ListTile(
+                        selected: page == i,
+                        selectedTileColor: const Color(0xffdceaff),
+                        leading: Icon(icons[i]),
+                        title: Text(labels[i]),
+                        onTap: () => setState(() => page = i),
+                      ),
+                    const Spacer(),
+                    const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text('Bản phát triển\nChưa dùng ghi sổ thực tế'),
+                    ),
+                  ],
+                ),
+              ),
+            Expanded(
+              child: Padding(padding: const EdgeInsets.all(20), child: content),
+            ),
+          ],
+        ),
+      ),
+      bottomNavigationBar: MediaQuery.sizeOf(context).width < 800
+          ? NavigationBar(
+              selectedIndex: page,
+              onDestinationSelected: (i) => setState(() => page = i),
+              destinations: [
+                for (var i = 0; i < labels.length; i++)
+                  NavigationDestination(icon: Icon(icons[i]), label: labels[i]),
+              ],
+            )
+          : null,
+    );
+  }
+}
+
+class Overview extends ConsumerWidget {
+  const Overview({super.key});
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final products = ref.watch(productsProvider).asData?.value;
+    final drafts = ref.watch(draftsProvider).asData?.value;
+    final queue = ref.watch(queueProvider).asData?.value;
+    return ListView(
+      children: [
+        const Text(
+          'Tổng quan cửa hàng',
+          style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 20),
+        Wrap(
+          spacing: 16,
+          runSpacing: 16,
+          children: [
+            metric(
+              'Hàng hóa cục bộ',
+              products?.length.toString() ?? '…',
+              Colors.blue,
+            ),
+            metric(
+              'Đơn đã lưu',
+              drafts?.length.toString() ?? '…',
+              Colors.green,
+            ),
+            metric(
+              'Chờ xác nhận',
+              queue?.length.toString() ?? '…',
+              Colors.orange,
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        const Card(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'Bắt đầu bằng cách thêm hàng hóa, sau đó lập đơn bán hàng.\n\nDữ liệu được lưu trên thiết bị. Đơn chờ xử lý chưa trừ kho, chưa ghi nhận doanh thu hoặc công nợ.\nChưa cấu hình đăng nhập, trạm xác nhận và đồng bộ Firebase.',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget metric(String label, String value, MaterialColor color) => SizedBox(
+    width: 240,
+    child: Card(
+      color: color.shade50,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 30,
+                fontWeight: FontWeight.bold,
+                color: color.shade800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class Catalog extends ConsumerStatefulWidget {
+  const Catalog({super.key});
+  @override
+  ConsumerState<Catalog> createState() => _CatalogState();
+}
+
+class _CatalogState extends ConsumerState<Catalog> {
+  String search = '';
+  Future<void> add() async {
+    final fields = List.generate(4, (_) => TextEditingController());
+    final form = GlobalKey<FormState>();
+    String? error;
+    bool busy = false;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('Thêm hàng hóa'),
+          content: SizedBox(
+            width: 440,
+            child: Form(
+              key: form,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var i = 0; i < 4; i++)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: TextFormField(
+                        controller: fields[i],
+                        decoration: InputDecoration(
+                          labelText: [
+                            'Mã SKU',
+                            'Tên sản phẩm',
+                            'Đơn vị tính',
+                            'Giá bán (VND)',
+                          ][i],
+                        ),
+                        keyboardType: i == 3
+                            ? TextInputType.number
+                            : TextInputType.text,
+                        validator: (v) => v == null || v.trim().isEmpty
+                            ? 'Vui lòng nhập thông tin'
+                            : i == 3 &&
+                                  (int.tryParse(v) == null ||
+                                      int.parse(v) < 0 ||
+                                      int.parse(v) > 1000000000000)
+                            ? 'Nhập số nguyên từ 0 đến 1.000.000.000.000'
+                            : null,
+                      ),
+                    ),
+                  if (error != null)
+                    Text(error!, style: const TextStyle(color: Colors.red)),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: busy ? null : () => Navigator.pop(context),
+              child: const Text('Hủy'),
+            ),
+            FilledButton(
+              onPressed: busy
+                  ? null
+                  : () async {
+                      if (!form.currentState!.validate()) {
+                        return;
+                      }
+                      update(() => busy = true);
+                      try {
+                        await ref
+                            .read(databaseProvider)
+                            .addProduct(
+                              fields[0].text,
+                              fields[1].text,
+                              fields[2].text,
+                              int.parse(fields[3].text),
+                            );
+                        if (context.mounted) {
+                          Navigator.pop(context);
+                        }
+                      } catch (_) {
+                        update(() {
+                          error = 'Không lưu được. Kiểm tra mã SKU trùng hoặc dữ liệu.';
+                          busy = false;
+                        });
+                      }
+                    },
+              child: const Text('Lưu hàng hóa'),
+            ),
+          ],
+        ),
+      ),
+    );
+    // Dialog route owns its text fields until its exit animation completes.
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    for (final field in fields) {
+      field.dispose();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Wrap(
+        spacing: 20,
+        runSpacing: 12,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          const Text(
+            'Danh sách hàng hóa',
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          ),
+          FilledButton.icon(
+            onPressed: add,
+            icon: const Icon(Icons.add),
+            label: const Text('Thêm hàng hóa'),
+          ),
+        ],
+      ),
+      const SizedBox(height: 20),
+      TextField(
+        decoration: const InputDecoration(
+          prefixIcon: Icon(Icons.search),
+          hintText: 'Tìm tên sản phẩm, mã SKU…',
+        ),
+        onChanged: (v) => setState(() => search = v.toLowerCase()),
+      ),
+      const SizedBox(height: 12),
+      Expanded(
+        child: ref
+            .watch(productsProvider)
+            .when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => const Text(
+                'Không đọc được database. Hãy khởi động lại ứng dụng.',
+              ),
+              data: (items) {
+                final filtered = items
+                    .where(
+                      (p) =>
+                          '${p.sku} ${p.name}'.toLowerCase().contains(search),
+                    )
+                    .toList();
+                if (filtered.isEmpty) {
+                  return const Center(child: Text('Chưa có hàng hóa phù hợp.'));
+                }
+                return ListView.builder(
+                  itemCount: filtered.length,
+                  itemBuilder: (_, i) {
+                    final p = filtered[i];
+                    return Card(
+                      child: ListTile(
+                        leading: const Icon(
+                          Icons.inventory_2_outlined,
+                          color: Colors.blue,
+                        ),
+                        title: Text(p.name),
+                        subtitle: Text('${p.sku} • ${p.unit}'),
+                        trailing: Text(
+                          money(p.price),
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+      ),
+    ],
+  );
+}
+
+class SaleEditor extends ConsumerStatefulWidget {
+  final Draft? draft;
+  const SaleEditor({super.key, this.draft});
+  @override
+  ConsumerState<SaleEditor> createState() => _SaleEditorState();
+}
+
+class _SaleEditorState extends ConsumerState<SaleEditor> {
+  late String id;
+  List<SaleLine> lines = [];
+  final invalidQuantities = <String>{};
+  final customer = TextEditingController(),
+      discount = TextEditingController(text: '0'),
+      paid = TextEditingController(text: '0');
+  Timer? timer;
+  Future<void> tail = Future.value();
+  bool busy = false, submitted = false;
+  String status = 'Chưa lưu', search = '';
+  @override
+  void initState() {
+    super.initState();
+    id = widget.draft?.id ?? const Uuid().v4();
+    if (widget.draft != null) {
+      final j = jsonDecode(widget.draft!.payload) as Map<String, dynamic>;
+      lines = (j['lines'] as List)
+          .map((v) => SaleLine.fromJson(v as Map<String, dynamic>))
+          .toList();
+      customer.text = j['customer'] as String;
+      discount.text = '${j['discount']}';
+      paid.text = '${j['paid']}';
+    }
+  }
+
+  SaleTotals? get totals {
+    if (invalidQuantities.isNotEmpty) return null;
+    try {
+      return SaleTotals(
+        lines,
+        discount: int.parse(discount.text),
+        paid: int.parse(paid.text),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Map<String, dynamic> get payload => {
+    'customer': customer.text,
+    'lines': lines.map((l) => l.toJson()).toList(),
+    'discount': int.parse(discount.text),
+    'paid': int.parse(paid.text),
+  };
+  void changed() {
+    setState(() => status = 'Đang chỉnh sửa');
+    timer?.cancel();
+    timer = Timer(const Duration(milliseconds: 500), () => save());
+  }
+
+  Future<void> save({bool submit = false}) async {
+    if (submitted || totals == null || lines.isEmpty) {
+      return;
+    }
+    final snapshot = payload;
+    final draftId = id;
+    final database = ref.read(databaseProvider);
+    tail = tail
+        .catchError((Object _) {})
+        .then((_) => database.saveDraft(draftId, snapshot, submit: submit));
+    try {
+      await tail;
+      if (mounted) {
+        setState(() {
+          status = submit
+              ? 'Chờ xác nhận • Chưa ghi sổ'
+              : 'Đã lưu trên thiết bị';
+          if (submit) {
+            submitted = true;
+          }
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => status = 'Lưu thất bại. Vui lòng thử lại.');
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    timer?.cancel();
+    customer.dispose();
+    discount.dispose();
+    paid.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = totals;
+    final products = ref.watch(productsProvider).asData?.value ?? <Product>[];
+    return ListView(
+      children: [
+        const Text(
+          'Tạo đơn bán hàng',
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: customer,
+          enabled: !submitted && !busy,
+          decoration: const InputDecoration(
+            labelText: 'Khách hàng / Số điện thoại',
+          ),
+          onChanged: (_) => changed(),
+        ),
+        const SizedBox(height: 16),
+        if (!submitted)
+          TextField(
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search),
+              hintText: 'Tìm hàng để thêm vào đơn',
+            ),
+            onChanged: (v) => setState(() => search = v),
+          ),
+        if (!submitted)
+          ...products
+              .where(
+                (p) =>
+                    search.isNotEmpty &&
+                    '${p.name} ${p.sku}'.toLowerCase().contains(
+                      search.toLowerCase(),
+                    ),
+              )
+              .take(8)
+              .map(
+                (p) => ListTile(
+                  title: Text(p.name),
+                  subtitle: Text('${p.sku} • ${money(p.price)} / ${p.unit}'),
+                  trailing: const Icon(Icons.add_circle_outline),
+                  onTap: busy
+                      ? null
+                      : () {
+                          final i = lines.indexWhere(
+                            (l) => l.productId == p.id,
+                          );
+                          if (i < 0) {
+                            lines.add(
+                              SaleLine(
+                                productId: p.id,
+                                sku: p.sku,
+                                name: p.name,
+                                unit: p.unit,
+                                price: p.price,
+                              ),
+                            );
+                          } else {
+                            lines[i] = lines[i].withQuantity(
+                              lines[i].quantity + 1,
+                            );
+                          }
+                          changed();
+                        },
+                ),
+              ),
+        const SizedBox(height: 12),
+        if (lines.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'Thêm hàng hóa ở mục Hàng hóa, sau đó tìm và chọn sản phẩm.',
+            ),
+          ),
+        for (var i = 0; i < lines.length; i++)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    lines[i].name,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    '${lines[i].sku} • ${money(lines[i].price)} / ${lines[i].unit}',
+                  ),
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 130,
+                        child: TextFormField(
+                          key: ValueKey(lines[i].productId),
+                          initialValue: '${lines[i].quantity}',
+                          enabled: !submitted && !busy,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Số lượng',
+                          ),
+                          onChanged: (v) {
+                            final q = int.tryParse(v);
+                            if (q != null && q > 0 && q <= 1000000) {
+                              invalidQuantities.remove(lines[i].productId);
+                              lines[i] = lines[i].withQuantity(q);
+                            } else {
+                              invalidQuantities.add(lines[i].productId);
+                            }
+                            changed();
+                          },
+                          validator: (v) => int.tryParse(v ?? '') == null
+                              ? 'Số lượng không hợp lệ'
+                              : null,
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(money(lines[i].total)),
+                      IconButton(
+                        onPressed: submitted || busy
+                            ? null
+                            : () {
+                                invalidQuantities.remove(lines[i].productId);
+                                lines.removeAt(i);
+                                changed();
+                              },
+                        icon: const Icon(Icons.delete_outline),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: discount,
+                enabled: !submitted && !busy,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Chiết khấu (VND)',
+                ),
+                onChanged: (_) => changed(),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: TextField(
+                controller: paid,
+                enabled: !submitted && !busy,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Thanh toán tạm (VND)',
+                ),
+                onChanged: (_) => changed(),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        if (t == null)
+          const Text(
+            'Kiểm tra chiết khấu/thanh toán: phải là số nguyên không âm và không vượt giá trị đơn.',
+            style: TextStyle(color: Colors.red),
+          )
+        else
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text('Tiền hàng: ${money(t.subtotal)}'),
+                  Text(
+                    'Tổng tiền: ${money(t.total)}',
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text('Còn nợ tạm tính: ${money(t.debt)}'),
+                ],
+              ),
+            ),
+          ),
+        Text(status),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 12,
+          children: [
+            OutlinedButton(
+              onPressed: submitted || busy || t == null || lines.isEmpty
+                  ? null
+                  : () => save(),
+              child: const Text('Lưu nháp'),
+            ),
+            FilledButton(
+              onPressed: submitted || busy || t == null || lines.isEmpty
+                  ? null
+                  : () async {
+                      timer?.cancel();
+                      setState(() => busy = true);
+                      await save(submit: true);
+                      if (mounted) {
+                        setState(() => busy = false);
+                      }
+                    },
+              child: const Text('Gửi chờ xác nhận'),
+            ),
+            if (submitted)
+              OutlinedButton(
+                onPressed: () => setState(() {
+                  id = const Uuid().v4();
+                  lines = [];
+                  customer.clear();
+                  discount.text = '0';
+                  paid.text = '0';
+                  invalidQuantities.clear();
+                  submitted = false;
+                  status = 'Chưa lưu';
+                }),
+                child: const Text('Tạo đơn tiếp theo'),
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'Chưa kết nối trạm xác nhận. Không dùng đơn tạm thay cho chứng từ đã ghi sổ.',
+        ),
+      ],
+    );
+  }
+}
+
+class DraftList extends ConsumerWidget {
+  const DraftList({super.key});
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => ref
+      .watch(draftsProvider)
+      .when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (_, _) => const Text('Không tải được đơn.'),
+        data: (items) => items.isEmpty
+            ? const Center(child: Text('Chưa có đơn được lưu.'))
+            : ListView(
+                children: [
+                  const Text(
+                    'Đơn đã lưu',
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                  ),
+                  for (final d in items)
+                    Card(
+                      child: ListTile(
+                        title: Text('Đơn ${d.id.substring(0, 8)}'),
+                        subtitle: Text(
+                          '${DateFormat('dd/MM/yyyy HH:mm').format(d.updatedAt)} • ${d.status == 'draft' ? 'Bản nháp' : 'Chờ xác nhận'}',
+                        ),
+                        trailing: d.status == 'draft'
+                            ? const Icon(Icons.edit_outlined)
+                            : const Icon(Icons.hourglass_empty),
+                        onTap: d.status != 'draft'
+                            ? null
+                            : () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => Scaffold(
+                                    appBar: AppBar(
+                                      title: const Text('Khôi phục đơn nháp'),
+                                    ),
+                                    body: Padding(
+                                      padding: const EdgeInsets.all(20),
+                                      child: SaleEditor(draft: d),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                      ),
+                    ),
+                ],
+              ),
+      );
+}
+
+class QueueView extends ConsumerWidget {
+  const QueueView({super.key});
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => ref
+      .watch(queueProvider)
+      .when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (_, _) => const Text('Không tải được hàng đợi.'),
+        data: (items) => ListView(
+          children: [
+            const Text(
+              'Hàng đợi giao dịch',
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+            const Text(
+              'Chưa cấu hình Firebase/trạm xác nhận. Giao dịch được giữ trên thiết bị, không tự xác nhận.',
+            ),
+            for (final item in items)
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.cloud_off),
+                  title: Text(item.aggregateId.substring(0, 8)),
+                  subtitle: Text('Chờ đồng bộ • Số lần thử: ${item.attempts}'),
+                ),
+              ),
+          ],
+        ),
+      );
+}
