@@ -5,6 +5,12 @@
 Phần bên dưới mục này là nhật ký bản nền tảng trước; trạng thái mới được ghi ở
 đây. Chưa đánh dấu V1.0 hoàn thành.
 
+Kết quả source 0.2: analyze sạch; 36 ca unit/widget đạt; 7 ca Rules và 1 kịch bản
+tích hợp REST trên emulator đạt. Test emulator được skip trong test thường,
+chạy riêng qua script trong security/README.md. Windows release đã build và mở
+được cửa sổ tổng quan; gói mới là `dist/VLXD-Bay-Hai-Windows-0.2-dev.zip`.
+Chưa kiểm chứng thao tác in thật.
+
 Đã thêm schema 4 và migration giữ lại catalog/đơn nháp/outbox bản 1. Có bảng
 business records, command receipts, business events, checkpoint/inbox và print jobs.
 
