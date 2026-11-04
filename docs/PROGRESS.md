@@ -27,6 +27,8 @@ Windows release, Web release và APK Android release đã build thành công.
 Build không thay thế smoke test trên thiết bị thật. Windows đã được đóng gói
 trong `dist/VLXD-Bay-Hai-Windows-dev.zip` (giải nén toàn bộ rồi chạy exe).
 APK ở `build/app/outputs/flutter-apk/app-release.apk`.
+APK hiện dùng debug signing key của scaffold để thử nghiệm; chưa phải bản
+ký phát hành chính thức. Web đã rebuild từ source hiện tại; chưa deploy.
 
 ## Phần còn thiếu — chưa được coi là hoàn thành
 
