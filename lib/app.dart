@@ -8,14 +8,45 @@ import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 
 import 'data/database.dart';
+import 'data/app_runtime.dart';
+import 'features/login_gate.dart';
+import 'features/business_pages.dart';
+import 'features/reports_search.dart';
+import 'features/data_tools.dart';
+import 'features/business_drafts.dart';
+import 'features/quotes_page.dart';
+import 'features/reservations_page.dart';
+import 'features/catalog_page.dart';
+import 'features/staff_page.dart';
+import 'features/alerts_page.dart';
+import 'features/vehicles_page.dart';
+import 'features/print_jobs_page.dart';
+import 'features/settings_page.dart';
+import 'features/documents_page.dart';
+import 'domain/operations.dart';
 import 'domain/sale.dart';
 import 'features/material_calculator.dart';
 import 'features/receipt_preview.dart';
 
 final databaseProvider = Provider<AppDatabase>((ref) {
-  final db = AppDatabase();
+  final config = AppConnection.environment();
+  final db = AppDatabase(
+    null,
+    config.configured
+        ? 'bayhai_${config.projectId}_${config.storeId}'
+        : 'bayhai_v1',
+  );
   ref.onDispose(db.close);
   return db;
+});
+final runtimeProvider = Provider<AppRuntime>((ref) {
+  final value = AppRuntime(
+    ref.watch(databaseProvider),
+    AppConnection.environment(),
+  );
+  ref.onDispose(value.dispose);
+  unawaited(value.restore());
+  return value;
 });
 final productsProvider = StreamProvider(
   (ref) => ref.watch(databaseProvider).watchProducts(),
@@ -29,8 +60,32 @@ final queueProvider = StreamProvider(
 String money(int value) =>
     '${NumberFormat.decimalPattern('vi').format(value)} đ';
 final router = GoRouter(
-  routes: [GoRoute(path: '/', builder: (_, _) => const Workspace())],
+  routes: [GoRoute(path: '/', builder: (_, _) => const RuntimeGate())],
 );
+
+class RuntimeGate extends ConsumerWidget {
+  const RuntimeGate({super.key});
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final runtime = ref.watch(runtimeProvider);
+    return ListenableBuilder(
+      listenable: runtime,
+      builder: (context, _) => LoginGate(
+        runtime: runtime,
+        child: runtime.actor == null
+            ? const Workspace()
+            : ProviderScope(
+                key: ValueKey(runtime.actor!.uid),
+                overrides: [
+                  databaseProvider.overrideWithValue(runtime.db),
+                  runtimeProvider.overrideWithValue(runtime),
+                ],
+                child: const Workspace(),
+              ),
+      ),
+    );
+  }
+}
 
 class BayHaiApp extends StatelessWidget {
   const BayHaiApp({super.key});
@@ -82,17 +137,107 @@ class _WorkspaceState extends ConsumerState<Workspace> {
   ];
   @override
   Widget build(BuildContext context) {
-    final content = IndexedStack(
-      index: page,
-      children: const [
-        Overview(),
-        Catalog(),
-        SaleEditor(),
-        DraftList(),
-        QueueView(),
-        MaterialCalculator(),
-      ],
-    );
+    final runtime = SessionScope.maybeOf(context);
+    final driver = runtime?.actor?.role == StaffRole.driver;
+    final labels = runtime == null
+        ? this.labels
+        : driver
+        ? ['Giao hàng', 'Đồng bộ']
+        : [
+            'Tổng quan',
+            'Hàng hóa',
+            'Bán hàng',
+            'Mua hàng',
+            'Đối tác',
+            'Kho',
+            'Thu chi / Công nợ',
+            'Bảo hành',
+            'Đồng bộ / Trạm',
+            'Tính vật liệu',
+            'Giao hàng',
+            'Báo cáo',
+            'Tìm kiếm',
+            'Excel / Sao lưu',
+            'Đơn nháp',
+            'Báo giá',
+            'Giữ hàng / Duyệt tồn',
+            'Lô / Serial',
+            'Nhân viên',
+            'Cảnh báo',
+            'Xe giao hàng',
+            'Yêu cầu / Nhật ký in',
+            'Thiết lập',
+            'Chứng từ',
+          ];
+    final icons = runtime == null
+        ? this.icons
+        : driver
+        ? [Icons.local_shipping_outlined, Icons.sync]
+        : [
+            Icons.dashboard_outlined,
+            Icons.inventory_2_outlined,
+            Icons.shopping_cart_outlined,
+            Icons.local_shipping_outlined,
+            Icons.people_outline,
+            Icons.warehouse_outlined,
+            Icons.payments_outlined,
+            Icons.build_outlined,
+            Icons.sync,
+            Icons.calculate_outlined,
+            Icons.local_shipping_outlined,
+            Icons.bar_chart_outlined,
+            Icons.search,
+            Icons.backup_outlined,
+            Icons.edit_note_outlined,
+            Icons.request_quote_outlined,
+            Icons.pending_actions_outlined,
+            Icons.qr_code_outlined,
+            Icons.manage_accounts_outlined,
+            Icons.notifications_active_outlined,
+            Icons.directions_car_outlined,
+            Icons.print_outlined,
+            Icons.settings_outlined,
+            Icons.description_outlined,
+          ];
+    final pages = runtime == null
+        ? const [
+            Overview(),
+            Catalog(),
+            SaleEditor(),
+            DraftList(),
+            QueueView(),
+            MaterialCalculator(),
+          ]
+        : driver
+        ? [DeliveriesPage(runtime: runtime), ConnectionPage(runtime: runtime)]
+        : [
+            ReportsPage(runtime: runtime),
+            CatalogPage(runtime: runtime),
+            TradingPage(runtime: runtime),
+            TradingPage(runtime: runtime, purchase: true),
+            PartiesPage(runtime: runtime),
+            StockPage(runtime: runtime),
+            FinancePage(runtime: runtime),
+            WarrantiesPage(runtime: runtime),
+            ConnectionPage(runtime: runtime),
+            const MaterialCalculator(),
+            DeliveriesPage(runtime: runtime),
+            ReportsPage(runtime: runtime),
+            GlobalSearchPage(runtime: runtime),
+            DataToolsPage(runtime: runtime),
+            BusinessDraftsPage(runtime: runtime),
+            QuotesPage(runtime: runtime),
+            ReservationsPage(runtime: runtime),
+            TrackingPage(runtime: runtime),
+            StaffPage(runtime: runtime),
+            AlertsPage(runtime: runtime),
+            VehiclesPage(runtime: runtime),
+            PrintJobsPage(runtime: runtime),
+            SettingsPage(runtime: runtime),
+            DocumentsPage(runtime: runtime),
+          ];
+    if (page >= pages.length) page = 0;
+    final content = KeyedSubtree(key: ValueKey(page), child: pages[page]);
     return Scaffold(
       appBar: AppBar(
         backgroundColor: const Color(0xff0055d9),
@@ -102,10 +247,28 @@ class _WorkspaceState extends ConsumerState<Workspace> {
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         actions: [
+          if (runtime != null) ...[
+            IconButton(
+              tooltip: 'Đồng bộ',
+              onPressed: runtime.syncing ? null : runtime.tick,
+              icon: Icon(
+                runtime.offline ? Icons.cloud_off_outlined : Icons.sync,
+              ),
+            ),
+            IconButton(
+              tooltip: 'Đăng xuất',
+              onPressed: runtime.logout,
+              icon: const Icon(Icons.logout),
+            ),
+          ],
           if (MediaQuery.sizeOf(context).width >= 800)
-            const Padding(
+            Padding(
               padding: EdgeInsets.all(16),
-              child: Text('Cục bộ • Chưa kết nối Firebase'),
+              child: Text(
+                runtime == null
+                    ? 'Cục bộ • Chưa kết nối Firebase'
+                    : '${roleLabel(runtime.actor!.role)} • ${runtime.offline ? 'Offline' : 'Đã đăng nhập'}',
+              ),
             )
           else
             const Padding(
@@ -126,15 +289,20 @@ class _WorkspaceState extends ConsumerState<Workspace> {
                 child: Column(
                   children: [
                     const SizedBox(height: 24),
-                    for (var i = 0; i < labels.length; i++)
-                      ListTile(
-                        selected: page == i,
-                        selectedTileColor: const Color(0xffdceaff),
-                        leading: Icon(icons[i]),
-                        title: Text(labels[i]),
-                        onTap: () => setState(() => page = i),
+                    Expanded(
+                      child: ListView(
+                        children: [
+                          for (var i = 0; i < labels.length; i++)
+                            ListTile(
+                              selected: page == i,
+                              selectedTileColor: const Color(0xffdceaff),
+                              leading: Icon(icons[i]),
+                              title: Text(labels[i]),
+                              onTap: () => setState(() => page = i),
+                            ),
+                        ],
                       ),
-                    const Spacer(),
+                    ),
                     TextButton(
                       onPressed: () => showLicensePage(
                         context: context,
@@ -271,9 +439,11 @@ class Catalog extends ConsumerStatefulWidget {
 class _CatalogState extends ConsumerState<Catalog> {
   String search = '';
   Future<void> add() async {
+    final runtime = SessionScope.maybeOf(context);
     final fields = List.generate(4, (_) => TextEditingController());
     final form = GlobalKey<FormState>();
     String? error;
+    String tracking = 'none';
     bool busy = false;
     await showDialog<void>(
       context: context,
@@ -315,6 +485,28 @@ class _CatalogState extends ConsumerState<Catalog> {
                     ),
                   if (error != null)
                     Text(error!, style: const TextStyle(color: Colors.red)),
+                  if (runtime != null)
+                    DropdownButtonFormField<String>(
+                      initialValue: tracking,
+                      decoration: const InputDecoration(
+                        labelText: 'Theo dõi tồn',
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'none',
+                          child: Text('Theo số lượng'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'lot',
+                          child: Text('Theo lô / mã màu'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'serial',
+                          child: Text('Theo serial thiết bị'),
+                        ),
+                      ],
+                      onChanged: busy ? null : (v) => tracking = v!,
+                    ),
                 ],
               ),
             ),
@@ -333,14 +525,28 @@ class _CatalogState extends ConsumerState<Catalog> {
                       }
                       update(() => busy = true);
                       try {
-                        await ref
-                            .read(databaseProvider)
-                            .addProduct(
-                              fields[0].text,
-                              fields[1].text,
-                              fields[2].text,
-                              int.parse(fields[3].text),
-                            );
+                        if (runtime != null) {
+                          await runtime.enqueue(
+                            Operation.catalog,
+                            const Uuid().v4(),
+                            {
+                              'sku': fields[0].text.trim(),
+                              'name': fields[1].text.trim(),
+                              'unit': fields[2].text.trim(),
+                              'price': int.parse(fields[3].text),
+                              'tracking': tracking,
+                            },
+                          );
+                        } else {
+                          await ref
+                              .read(databaseProvider)
+                              .addProduct(
+                                fields[0].text,
+                                fields[1].text,
+                                fields[2].text,
+                                int.parse(fields[3].text),
+                              );
+                        }
                         if (context.mounted) {
                           Navigator.pop(context);
                         }

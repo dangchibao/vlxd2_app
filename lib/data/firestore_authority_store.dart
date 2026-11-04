@@ -10,6 +10,20 @@ import 'firestore_rest.dart';
 /// Stages all business writes and commits them with receipt/event atomically.
 /// No SQLite state is treated as confirmed before a cloud commit succeeds.
 class FirestoreAuthorityStore implements AuthorityStore {
+  @override
+  Future<Map<String, dynamic>?> member(String uid) =>
+      _load(_path('members', uid));
+  @override
+  Future<void> writeMember(String uid, Map<String, dynamic> data) =>
+      _put(_path('members', uid), data);
+  @override
+  Future<void> writeProduct(Product product) =>
+      _put(_path('catalog', product.id), {
+        'sku': product.sku,
+        'name': product.name,
+        'unit': product.unit,
+        'price': product.price,
+      });
   final FirestoreRest firestore;
   final String storeId;
   final Future<AuthSession> Function() sessionProvider;
@@ -209,6 +223,23 @@ class FirestoreAuthorityStore implements AuthorityStore {
     Actor actor,
     Map<String, dynamic> payload,
   ) async {
+    final receiptPath = _path('receipts', command.id);
+    final receipt = await _load(receiptPath);
+    if (receipt != null) {
+      final result = actor.role == StaffRole.driver
+          ? {
+              'id': command.entityId,
+              'version': (payload['result'] as Map<String, dynamic>)['version'],
+              'deliveryStatus':
+                  (payload['result'] as Map<String, dynamic>)['deliveryStatus'],
+            }
+          : receipt['result'];
+      await _put(receiptPath, {
+        ...receipt,
+        'actorUid': actor.uid,
+        'result': result,
+      });
+    }
     final metaPath = _recordPath('system', 'eventSequence');
     final meta = await _load(metaPath);
     final next = (meta?['next'] as int? ?? 0) + 1;
@@ -282,6 +313,7 @@ class RemoteAuthorityProcessor {
         final result = {'code': error.code, 'message': error.message};
         await store._put(path, {
           'commandId': commandId,
+          'actorUid': actorUid,
           'status': status,
           'fingerprint': command.fingerprint(actorUid),
           'result': result,

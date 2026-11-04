@@ -1,5 +1,12 @@
 {
   "firestore": {"rules": "security/firestore.rules"},
+  "hosting": {
+    "public": "build/web",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [{"source": "**", "destination": "/index.html"}],
+    "headers": [{"source":"**", "headers":[{"key":"Cache-Control","value":"no-cache"}]},
+      {"source":"**/*.wasm", "headers":[{"key":"Content-Type","value":"application/wasm"}]}]
+  },
   "emulators": {
     "auth": {"host":"127.0.0.1", "port":9099},
     "firestore": {"host":"127.0.0.1", "port":8080},

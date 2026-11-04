@@ -4,7 +4,8 @@ import 'package:http/http.dart' as http;
 
 class AuthFailure implements Exception {
   final String message;
-  const AuthFailure(this.message);
+  final bool retryable;
+  const AuthFailure(this.message, {this.retryable = false});
   @override
   String toString() => message;
 }
@@ -67,7 +68,10 @@ class FirebaseAuthRest {
     } on AuthFailure {
       rethrow;
     } catch (_) {
-      throw const AuthFailure('Không kết nối được dịch vụ xác thực.');
+      throw const AuthFailure(
+        'Không kết nối được dịch vụ xác thực.',
+        retryable: true,
+      );
     }
   }
 

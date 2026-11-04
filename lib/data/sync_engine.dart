@@ -294,6 +294,10 @@ class SyncEngine {
     required String eventId,
     required int sequence,
     required Map<String, dynamic> projections,
+    Map<String, dynamic>? details,
+    String? actorId,
+    String? operation,
+    DateTime? occurredAt,
   }) => db.transaction(() async {
     final checkpoint = await (db.select(
       db.syncCheckpoints,
@@ -341,6 +345,20 @@ class SyncEngine {
               version: version,
             ),
           );
+      if (kind == 'catalog') {
+        final id = textField(data, 'id');
+        await db
+            .into(db.products)
+            .insertOnConflictUpdate(
+              ProductsCompanion.insert(
+                id: id,
+                sku: textField(data, 'sku'),
+                name: textField(data, 'name'),
+                unit: textField(data, 'unit'),
+                price: integerField(data, 'price'),
+              ),
+            );
+      }
     }
     await db
         .into(db.inboxEvents)
@@ -352,6 +370,20 @@ class SyncEngine {
             payload: canonicalJson(projections),
           ),
         );
+    if (details != null && actorId != null && operation != null) {
+      await db
+          .into(db.businessEvents)
+          .insert(
+            BusinessEventsCompanion.insert(
+              commandId: eventId,
+              kind: operation,
+              actorId: actorId,
+              payload: canonicalJson(details),
+              occurredAt: occurredAt ?? DateTime.now(),
+            ),
+            mode: InsertMode.insertOrIgnore,
+          );
+    }
     await db
         .into(db.syncCheckpoints)
         .insertOnConflictUpdate(

@@ -1,3 +1,9 @@
+import 'package:drift/native.dart';
+import 'package:vlxd_bay_hai/data/app_runtime.dart';
+import 'package:vlxd_bay_hai/data/database.dart';
+
+import 'runtime_test.dart' show MemoryVault;
+
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -157,7 +163,7 @@ void main() {
         expectedVersion: 1,
         payload: {
           'lines': [
-            {'productId': productId, 'quantity': 1000},
+            {'productId': productId, 'quantity': 1000, 'expectedPrice': 20000},
           ],
         },
       );
@@ -174,7 +180,11 @@ void main() {
               'customerId': 'customer',
               'discount': 0,
               'lines': [
-                {'productId': productId, 'quantity': 1000},
+                {
+                  'productId': productId,
+                  'quantity': 1000,
+                  'expectedPrice': 20000,
+                },
               ],
             },
           ),
@@ -198,6 +208,53 @@ void main() {
             authority.record('stock', jsonEncode(['main', productId, 'good'])),
       );
       expect(jsonDecode(stock!.payload)['quantity'], 0);
+      final base = AppDatabase(NativeDatabase.memory());
+      final userVault = MemoryVault();
+      await userVault.write(manager);
+      final stationVault = MemoryVault();
+      await stationVault.write(session);
+      final runtime = AppRuntime(
+        base,
+        AppConnection(
+          projectId: project,
+          apiKey: 'demo-key',
+          storeId: 'shop',
+          authEmulator: Uri.parse('http://127.0.0.1:9099'),
+          firestoreEmulator: Uri.parse('http://127.0.0.1:8080'),
+        ),
+        vault: userVault,
+        stationVault: stationVault,
+        databaseFactory: (_) => AppDatabase(NativeDatabase.memory()),
+      );
+      addTearDown(() async {
+        runtime.dispose();
+        await base.close();
+      });
+      await runtime.restore();
+      while (runtime.syncing) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      final catalogId = 'catalog-$uid';
+      final commandId = await runtime.enqueue(Operation.catalog, catalogId, {
+        'sku': 'SYNC-$uid',
+        'name': 'Đồng bộ hoàn chỉnh',
+        'unit': 'bao',
+        'price': 15000,
+      });
+      while (runtime.syncing) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      await runtime.retry(commandId);
+      final cached = await (runtime.db.select(
+        runtime.db.products,
+      )..where((p) => p.id.equals(catalogId))).getSingleOrNull();
+      expect(cached!.name, 'Đồng bộ hoàn chỉnh');
+      expect(
+        (await (runtime.db.select(
+          runtime.db.outbox,
+        )..where((o) => o.id.equals(commandId))).getSingle()).status,
+        'confirmed',
+      );
     },
     skip: !enabled,
     timeout: const Timeout(Duration(minutes: 2)),

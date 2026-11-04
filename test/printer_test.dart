@@ -62,6 +62,35 @@ void main() {
     );
   });
   test(
+    'Posted K80 renders decimal quantities and immutable snapshot amounts',
+    () async {
+      final bytes = await ReceiptRenderer().renderDocument(
+        kind: 'sale',
+        data: {
+          'id': 'sale',
+          'status': 'posted',
+          'total': 15000,
+          'discount': 0,
+          'paid': 5000,
+          'debt': 10000,
+          'lines': [
+            {
+              'productId': 'p',
+              'name': 'Cát vàng',
+              'sku': 'CAT',
+              'unit': 'm³',
+              'quantity': 1500,
+              'unitPrice': 10000,
+              'total': 15000,
+            },
+          ],
+        },
+      );
+      expect(String.fromCharCodes(bytes.take(4)), '%PDF');
+      expect(bytes.length, greaterThan(5000));
+    },
+  );
+  test(
     'Ambiguous print failure is persisted and not automatically retried',
     () async {
       final db = AppDatabase(NativeDatabase.memory());

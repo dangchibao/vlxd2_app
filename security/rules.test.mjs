@@ -40,3 +40,28 @@ test('Driver cannot read all sales or submit payment command',async()=>{
  await assertFails(getDoc(doc(db('driver'),'stores/shop/documents/sale1')));
  await assertFails(setDoc(doc(db('driver'),'stores/shop/commands/cmd1'),command('driver','payment')));
 });
+test('Driver reads only assigned delivery projection and own receipt',async()=>{
+ await env.withSecurityRulesDisabled(async context=>{
+  const s=context.firestore();
+  await setDoc(doc(s,'stores/shop/documents/assigned'),{kind:'delivery',payload:{driverId:'driver',lines:[]}});
+  await setDoc(doc(s,'stores/shop/documents/other'),{kind:'delivery',payload:{driverId:'someone-else',lines:[]}});
+  await setDoc(doc(s,'stores/shop/receipts/own'),{actorUid:'driver',status:'confirmed',result:{id:'assigned'}});
+  await setDoc(doc(s,'stores/shop/receipts/foreign'),{actorUid:'seller',status:'confirmed',result:{debt:1}});
+ });
+ await assertSucceeds(getDoc(doc(db('driver'),'stores/shop/documents/assigned')));
+ await assertFails(getDoc(doc(db('driver'),'stores/shop/documents/other')));
+ await assertSucceeds(getDoc(doc(db('driver'),'stores/shop/receipts/own')));
+ await assertFails(getDoc(doc(db('driver'),'stores/shop/receipts/foreign')));
+});
+
+test('Membership administration cannot bypass initial password activation or modify station',async()=>{
+ await assertFails(updateDoc(doc(db('station'),'stores/shop/members/first'),{mustChangePassword:false}));
+ await assertFails(updateDoc(doc(db('station'),'stores/shop/members/station'),{role:'admin'}));
+ await assertSucceeds(updateDoc(doc(db('station'),'stores/shop/members/seller'),{active:false}));
+ await assertFails(setDoc(doc(db('boss'),'stores/shop/commands/cmd1'),command('boss','staff')));
+});
+
+test('Seller can request reservation but cannot approve oversell',async()=>{
+ await assertSucceeds(setDoc(doc(db('seller'),'stores/shop/commands/cmd1'),command('seller','reservation')));
+ await assertFails(setDoc(doc(db('seller'),'stores/shop/commands/approval'),{...command('seller','approveReservation'),commandId:'approval'}));
+});

@@ -21,7 +21,9 @@ jobs:
       - run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter analyze
       - run: flutter test
+      - run: node --test tools/pwa-worker.test.mjs
       - run: npm --prefix security ci
       - run: npx --yes firebase-tools@15.34.2 emulators:exec --project demo-vlxd-bayhai --only auth,firestore "node security/run-emulator-tests.mjs"
       - run: flutter build windows --release
-      - run: flutter build web --release
+      - run: flutter build web --release --no-web-resources-cdn
+      - run: node tools/prepare-pwa.mjs

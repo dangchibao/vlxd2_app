@@ -1,8 +1,10 @@
 import 'dart:convert';
 
 import '../domain/operations.dart';
+import '../domain/product_policy.dart';
 import 'database.dart';
 import 'authority_store.dart';
+import 'stock_tracking.dart';
 
 /// Transaction processor for the trusted station. Authentication/transport must
 /// verify Actor independently; this class is not a replacement for cloud Rules.
@@ -11,6 +13,10 @@ class AuthorityEngine {
   final AuthorityStore store;
   AuthorityEngine(AppDatabase db) : store = DriftAuthorityStore(db);
   AuthorityEngine.withStore(this.store);
+  late final tracking = StockTracking(
+    read,
+    (kind, id, data) => _write(kind, id, data),
+  );
 
   Future<Map<String, dynamic>> execute(
     BusinessCommand command,
@@ -37,8 +43,14 @@ class AuthorityEngine {
     final payload =
         jsonDecode(canonicalJson(command.payload)) as Map<String, dynamic>;
     final kind = switch (command.operation) {
+      Operation.printResult || Operation.printClaim => 'printRequest',
+      Operation.approveReservation ||
+      Operation.cancelReservation ||
+      Operation.fulfillReservation => 'reservation',
       Operation.receive => 'purchase',
+      Operation.quoteToSale => 'quote',
       Operation.payment ||
+      Operation.assignDelivery ||
       Operation.delivery ||
       Operation.returnSale ||
       Operation.refund => 'sale',
@@ -66,12 +78,16 @@ class AuthorityEngine {
     final version = (record?.version ?? 0) + 1;
     result['version'] = version;
     result['id'] = command.entityId;
+    result['createdAt'] =
+        previous['createdAt'] ?? DateTime.now().toUtc().toIso8601String();
+    result['updatedAt'] = DateTime.now().toUtc().toIso8601String();
     await _write(kind, command.entityId, result, version: version);
     await store.saveReceipt(command.id, fingerprint, result);
     await store.appendEvent(command, verifiedActor, {
       'entityId': command.entityId,
       'input': payload,
       'result': result,
+      'before': previous,
     });
     return result;
   });
@@ -95,7 +111,11 @@ class AuthorityEngine {
       BusinessRecord(
         id: '$kind:$id',
         kind: kind,
-        payload: jsonEncode({...value, 'version': nextVersion}),
+        payload: jsonEncode({
+          ...value,
+          'id': value['id'] ?? id,
+          'version': nextVersion,
+        }),
         version: nextVersion,
       ),
     );
@@ -177,7 +197,14 @@ class AuthorityEngine {
   Future<int> _issue(String warehouse, String product, int quantity) async {
     final current = await stock(warehouse, product);
     final available = current['quantity'] as int? ?? 0;
-    if (quantity > available) {
+    final reserved =
+        (await read(
+              'reservedStock',
+              jsonEncode([warehouse, product]),
+            ))['quantity']
+            as int? ??
+        0;
+    if (quantity > available - reserved) {
       throw const BusinessException(
         'oversell',
         'Vượt tồn bán được. Cần quản lý duyệt đơn chờ nhập hoặc giao phần có sẵn.',
@@ -193,9 +220,702 @@ class AuthorityEngine {
     String id,
     Map<String, dynamic> p,
     Map<String, dynamic> old,
-    Actor actor,
-  ) async {
+    Actor actor, {
+    Map<String, dynamic>? quoteSnapshot,
+  }) async {
     switch (op) {
+      case Operation.settings:
+        if (id != 'store') {
+          throw const BusinessException(
+            'validation',
+            'Định danh cấu hình không hợp lệ.',
+          );
+        }
+        return {
+          'name': textField(p, 'name'),
+          'address': p['address'] as String? ?? '',
+          'phone': p['phone'] as String? ?? '',
+          'taxCode': p['taxCode'] as String? ?? '',
+        };
+      case Operation.printRequest:
+        _fresh(old);
+        final kind = textField(p, 'documentKind'),
+            documentId = textField(p, 'documentId');
+        if (!{
+          'sale',
+          'quote',
+          'purchase',
+          'delivery',
+          'shiftClose',
+          'expense',
+          'payment',
+          'supplierPayment',
+          'refund',
+          'purchaseReceipt',
+          'transfer',
+          'returnReceipt',
+          'inventoryCount',
+          'warranty',
+        }.contains(kind)) {
+          throw const BusinessException(
+            'print',
+            'Loại phiếu chưa hỗ trợ gửi in.',
+          );
+        }
+        final snapshot = await read(kind, documentId);
+        if (snapshot.isEmpty ||
+            (actor.role == StaffRole.driver &&
+                (kind != 'delivery' || snapshot['driverId'] != actor.uid))) {
+          throw const BusinessException(
+            'permission',
+            'Không có quyền in chứng từ này.',
+          );
+        }
+        if (snapshot['version'] != integerField(p, 'documentVersion', min: 1)) {
+          throw const BusinessException(
+            'conflict',
+            'Chứng từ đã thay đổi. Đồng bộ lại trước khi gửi in.',
+          );
+        }
+        return {
+          'documentKind': kind,
+          'documentId': documentId,
+          'snapshot': snapshot,
+          'requestedBy': actor.uid,
+          'status': 'queued',
+        };
+      case Operation.printClaim:
+        if (old.isEmpty || old['status'] != 'queued') {
+          throw const BusinessException(
+            'locked',
+            'Yêu cầu đã được trạm khác nhận.',
+          );
+        }
+        return {
+          ...old,
+          'status': 'claimed',
+          'claimedBy': actor.uid,
+          'claimToken': textField(p, 'claimToken'),
+        };
+      case Operation.printResult:
+        if (old.isEmpty ||
+            old['status'] != 'claimed' ||
+            old['claimedBy'] != actor.uid ||
+            old['claimToken'] != p['claimToken']) {
+          throw const BusinessException(
+            'locked',
+            'Yêu cầu in không thuộc quyền giữ của thiết bị này hoặc đã đối chiếu.',
+          );
+        }
+        final status = textField(p, 'status');
+        if (!{'sent_to_system', 'cancelled', 'unknown'}.contains(status)) {
+          throw const BusinessException(
+            'print',
+            'Kết quả gửi in không hợp lệ.',
+          );
+        }
+        return {
+          ...old,
+          'status': status,
+          'operator': actor.uid,
+          'note': textField(p, 'note'),
+        };
+      case Operation.vehicle:
+        return {
+          ...old,
+          'name': textField(p, 'name'),
+          'plate': textField(p, 'plate').toUpperCase(),
+          'capacityKg': integerField(p, 'capacityKg', min: 1),
+          'active': p['active'] != false,
+        };
+      case Operation.staff:
+        if (actor.role != StaffRole.admin || id == actor.uid) {
+          throw const BusinessException(
+            'permission',
+            'Chỉ Admin được chỉnh nhân viên khác.',
+          );
+        }
+        final previous = await store.member(id);
+        if (previous == null || previous['role'] == 'station') {
+          throw const BusinessException(
+            'permission',
+            'Tài khoản cần được chủ project tạo trước; không chỉnh tài khoản trạm.',
+          );
+        }
+        final role = textField(p, 'role');
+        if (!StaffRole.values.any((r) => r.name == role) ||
+            p['active'] is! bool) {
+          throw const BusinessException(
+            'validation',
+            'Vai trò hoặc trạng thái không hợp lệ.',
+          );
+        }
+        final result = {
+          ...previous,
+          'role': role,
+          'active': p['active'],
+          'displayName': textField(p, 'displayName'),
+          'updatedBy': actor.uid,
+        };
+        await store.writeMember(id, result);
+        return {
+          'uid': id,
+          'role': role,
+          'active': p['active'],
+          'displayName': result['displayName'],
+          'mustChangePassword': previous['mustChangePassword'],
+        };
+      case Operation.inventoryCount:
+        _fresh(old);
+        final warehouse = textField(p, 'warehouse'),
+            product = textField(p, 'productId');
+        final quality = textField(p, 'quality');
+        if (!{'good', 'quarantine', 'damaged'}.contains(quality)) {
+          throw const BusinessException(
+            'validation',
+            'Chất lượng kiểm kê không hợp lệ.',
+          );
+        }
+        textField(p, 'reason');
+        final current = await stock(warehouse, product, quality: quality);
+        if ((current['version'] ?? 0) != integerField(p, 'stockVersion')) {
+          throw const BusinessException(
+            'conflict',
+            'Kho đã thay đổi sau lúc đếm. Hãy kiểm kê và đối chiếu lại.',
+          );
+        }
+        final physical = current['quantity'] as int? ?? 0;
+        final mode = await tracking.mode(product);
+        var previous = physical;
+        if (mode == 'lot') {
+          final lotId = textField(p, 'lotId');
+          final lot = await read(
+            'lotStock',
+            tracking.positionId(warehouse, product, lotId, quality),
+          );
+          previous = lot['quantity'] as int? ?? 0;
+          if (previous != integerField(p, 'expectedLotQuantity')) {
+            throw const BusinessException('conflict', 'Tồn lô đã thay đổi.');
+          }
+        }
+        final counted = integerField(p, 'counted', max: 1000000000),
+            delta = counted - previous;
+        if (quality == 'good' &&
+            delta < 0 &&
+            -delta > await _available(warehouse, product)) {
+          throw const BusinessException(
+            'reserved',
+            'Tồn thực đếm thấp hơn hàng đã giữ. Hủy hoặc xử lý đơn giữ trước.',
+          );
+        }
+        final value = delta < 0
+            ? -roundedRatio(current['value'] as int, -delta, physical)
+            : physical > 0
+            ? roundedRatio(current['value'] as int, delta, physical)
+            : roundedRatio(integerField(p, 'unitCost'), delta, 1000);
+        if (await store.product(product) == null) {
+          throw const BusinessException('missing', 'Hàng hóa không tồn tại.');
+        }
+        await tracking.adjust(warehouse, p, delta, id, quality);
+        if (delta != 0) {
+          await _stockChange(
+            warehouse,
+            product,
+            delta,
+            value,
+            quality: quality,
+          );
+        }
+        return {
+          ...p,
+          'previous': previous,
+          'difference': delta,
+          'valueDifference': value,
+          'status': 'posted',
+        };
+      case Operation.reservation:
+        _fresh(old);
+        final warehouse = textField(p, 'warehouse');
+        textField(p, 'customerId');
+        integerField(p, 'discount');
+        final lines = _lines(p), snapshots = <Map<String, dynamic>>[];
+        var oversell = false;
+        for (final line in lines) {
+          final product = await store.product(textField(line, 'productId'));
+          if (product == null) {
+            throw const BusinessException('missing', 'Hàng hóa không tồn tại.');
+          }
+          final terms = await _terms(product, line, p['customerId'] as String);
+          if (integerField(line, 'expectedPrice') != terms['unitPrice']) {
+            throw const BusinessException(
+              'conflict',
+              'Hàng hóa hoặc giá đã thay đổi. Đồng bộ và kiểm tra lại.',
+            );
+          }
+          final available = await _available(warehouse, product.id);
+          if (integerField(line, 'quantity', min: 1) > available) {
+            oversell = true;
+          }
+          snapshots.add({
+            ...line,
+            ...terms,
+            'name': product.name,
+            'sku': product.sku,
+            'unit': product.unit,
+            'reserved': 0,
+          });
+        }
+        if (!oversell) {
+          for (final line in snapshots) {
+            await _reserve(
+              warehouse,
+              line['productId'] as String,
+              line['quantity'] as int,
+            );
+            line['reserved'] = line['quantity'];
+          }
+        }
+        return {
+          ...p,
+          'lines': snapshots,
+          'ownerUid': actor.uid,
+          'status': oversell ? 'pendingApproval' : 'reserved',
+        };
+      case Operation.approveReservation:
+        if (old.isEmpty ||
+            !{'pendingApproval', 'waiting'}.contains(old['status'])) {
+          throw const BusinessException(
+            'locked',
+            'Yêu cầu không còn chờ duyệt.',
+          );
+        }
+        final decision = textField(p, 'decision');
+        textField(p, 'reason');
+        if (!{'wait', 'partial', 'reject'}.contains(decision)) {
+          throw const BusinessException(
+            'validation',
+            'Quyết định không hợp lệ.',
+          );
+        }
+        final warehouse = old['warehouse'] as String;
+        final lines = [
+          for (final line in old['lines'] as List)
+            Map<String, dynamic>.from(line as Map),
+        ];
+        if (decision == 'partial') {
+          for (final line in lines) {
+            final available = await _available(
+                  warehouse,
+                  line['productId'] as String,
+                ),
+                wanted = line['quantity'] as int;
+            final q = available < wanted ? available : wanted;
+            if (q > 0) {
+              await _reserve(warehouse, line['productId'] as String, q);
+            }
+            line['reserved'] = q;
+          }
+        }
+        return {
+          ...old,
+          'lines': lines,
+          'approvedBy': actor.uid,
+          'approvalReason': p['reason'],
+          'status': switch (decision) {
+            'wait' => 'waiting',
+            'partial' => 'partial',
+            _ => 'rejected',
+          },
+        };
+      case Operation.cancelReservation:
+      case Operation.fulfillReservation:
+        if (old.isEmpty ||
+            !{
+              'reserved',
+              'partial',
+              'waiting',
+              'pendingApproval',
+            }.contains(old['status'])) {
+          throw const BusinessException('locked', 'Đơn giữ hàng đã kết thúc.');
+        }
+        if (actor.role == StaffRole.sales && old['ownerUid'] != actor.uid) {
+          throw const BusinessException(
+            'permission',
+            'Chỉ xử lý đơn giữ hàng của mình.',
+          );
+        }
+        if (op == Operation.fulfillReservation &&
+            old['status'] == 'pendingApproval') {
+          throw const BusinessException(
+            'permission',
+            'Vượt tồn chưa được quản lý duyệt.',
+          );
+        }
+        final warehouse = old['warehouse'] as String;
+        final original = [
+          for (final line in old['lines'] as List)
+            Map<String, dynamic>.from(line as Map),
+        ];
+        for (final line in original) {
+          await _reserve(
+            warehouse,
+            line['productId'] as String,
+            -(line['reserved'] as int),
+          );
+        }
+        if (op == Operation.cancelReservation) {
+          return {...old, 'status': 'cancelled', 'cancelledBy': actor.uid};
+        }
+        final saleId = textField(p, 'saleId');
+        if ((await read('sale', saleId)).isNotEmpty) {
+          throw const BusinessException('duplicate', 'Mã đơn bán đã tồn tại.');
+        }
+        final partial = p['partial'] == true;
+        if (partial && old['status'] != 'partial') {
+          throw const BusinessException(
+            'validation',
+            'Chỉ giao phần có sẵn sau khi quản lý duyệt.',
+          );
+        }
+        final lines = <Map<String, dynamic>>[];
+        for (final line in original) {
+          final q = partial ? line['reserved'] as int : line['quantity'] as int;
+          if (q > 0) {
+            final factor = line['unitFactor'] as int? ?? 1000;
+            if ((BigInt.from(q) * BigInt.from(1000)) % BigInt.from(factor) !=
+                BigInt.zero) {
+              throw const BusinessException(
+                'unit',
+                'Phần giao không đủ đơn vị quy đổi; đổi sang đơn vị gốc trước khi ghi sổ.',
+              );
+            }
+            lines.add({
+              ...line,
+              'quantity': q,
+              'saleQuantity':
+                  (BigInt.from(q) * BigInt.from(1000) ~/ BigInt.from(factor))
+                      .toInt(),
+              if (partial && line['serials'] is List)
+                'serials': (line['serials'] as List).take(q ~/ 1000).toList(),
+            });
+          }
+        }
+        if (partial && (old['discount'] as int) > 0) {
+          throw const BusinessException(
+            'validation',
+            'Đơn có chiết khấu cần nhận đủ hàng hoặc hủy và tạo lại phần giao để đối chiếu chiết khấu.',
+          );
+        }
+        final result = await _apply(
+          Operation.sale,
+          saleId,
+          {...old, 'lines': lines, 'reservationId': id},
+          {},
+          actor,
+        );
+        final sale = {
+          ...result,
+          'id': saleId,
+          'version': 1,
+          'createdAt': DateTime.now().toUtc().toIso8601String(),
+        };
+        await _write('sale', saleId, sale, version: 1);
+        return {
+          ...old,
+          'status': 'converted',
+          'saleId': saleId,
+          'saleDocument': sale,
+          'unfulfilledLines': [
+            for (final line in original)
+              if (partial &&
+                  (line['quantity'] as int) > (line['reserved'] as int))
+                {
+                  ...line,
+                  'quantity':
+                      (line['quantity'] as int) - (line['reserved'] as int),
+                },
+          ],
+        };
+      case Operation.quote:
+        if (old['status'] == 'converted') {
+          throw const BusinessException(
+            'locked',
+            'Báo giá đã chuyển thành đơn.',
+          );
+        }
+        textField(p, 'customerId');
+        final lines = _lines(p), snapshots = <Map<String, dynamic>>[];
+        var subtotal = 0;
+        for (final line in lines) {
+          final product = await store.product(textField(line, 'productId'));
+          if (product == null) {
+            throw const BusinessException('missing', 'Hàng hóa không tồn tại.');
+          }
+          final terms = await _terms(product, line, p['customerId'] as String);
+          final price = terms['unitPrice'] as int;
+          if (integerField(line, 'expectedPrice') != price) {
+            throw const BusinessException(
+              'conflict',
+              'Giá hàng đã thay đổi. Đồng bộ và kiểm tra lại báo giá.',
+            );
+          }
+          final total = roundedRatio(
+            price,
+            integerField(line, 'quantity', min: 1),
+            1000,
+          );
+          subtotal += total;
+          snapshots.add({
+            ...line,
+            'sku': product.sku,
+            'name': product.name,
+            'unit': product.unit,
+            ...terms,
+            'total': total,
+          });
+        }
+        final discount = integerField(p, 'discount');
+        if (discount > subtotal) {
+          throw const BusinessException(
+            'validation',
+            'Chiết khấu vượt tổng tiền.',
+          );
+        }
+        final approved =
+            actor.role == StaffRole.admin || actor.role == StaffRole.manager;
+        if (discount > 0 && !approved) {
+          throw const BusinessException(
+            'permission',
+            'Chiết khấu cần quản lý duyệt.',
+          );
+        }
+        final result = {
+          ...p,
+          'lines': snapshots,
+          'total': subtotal - discount + _surcharge(p),
+          'storeSnapshot': await read('settings', 'store'),
+          'customerName':
+              (await read('party', p['customerId'] as String))['name'] ??
+              p['customerId'],
+          'buyerSnapshot': await read('party', p['customerId'] as String),
+          'surcharge': _surcharge(p),
+          'discount': discount,
+          'discountApproved': approved,
+          'status': 'active',
+        };
+        final version = (old['version'] as int? ?? 0) + 1;
+        await _write('quoteVersion', '$id:$version', {
+          ...result,
+          'quoteId': id,
+          'quoteVersion': version,
+        });
+        return result;
+      case Operation.quoteToSale:
+        if (old.isEmpty || old['status'] != 'active') {
+          throw const BusinessException(
+            'locked',
+            'Báo giá không còn ở trạng thái có thể chuyển đơn.',
+          );
+        }
+        final saleId = textField(p, 'saleId');
+        if ((await read('sale', saleId)).isNotEmpty) {
+          throw const BusinessException('duplicate', 'Mã đơn bán đã tồn tại.');
+        }
+        final result = await _apply(
+          Operation.sale,
+          saleId,
+          {
+            'warehouse': textField(p, 'warehouse'),
+            'customerId': old['customerId'],
+            'discount': old['discount'],
+            'surcharge': old['surcharge'] ?? 0,
+            'dueAt': old['dueAt'] ?? '',
+            'quoteId': id,
+            'lines': [
+              for (final line in old['lines'] as List)
+                {
+                  ...(line as Map<String, dynamic>),
+                  'productId': line['productId'],
+                  'quantity': line['quantity'],
+                },
+            ],
+          },
+          {},
+          actor,
+          quoteSnapshot: old,
+        );
+        final sale = {
+          ...result,
+          'id': saleId,
+          'version': 1,
+          'createdAt': DateTime.now().toUtc().toIso8601String(),
+        };
+        await _write('sale', saleId, sale, version: 1);
+        return {
+          ...old,
+          'status': 'converted',
+          'saleId': saleId,
+          'saleDocument': sale,
+        };
+      case Operation.assignDelivery:
+        if (old.isEmpty) {
+          throw const BusinessException('missing', 'Không tìm thấy đơn bán.');
+        }
+        final driver = textField(p, 'driverId'),
+            vehicle = textField(p, 'vehicleId');
+        final vehicleData = await read('vehicle', vehicle);
+        final load = p['loadKg'] == null ? 0 : integerField(p, 'loadKg');
+        if (vehicleData.isNotEmpty &&
+            (vehicleData['active'] == false ||
+                load > (vehicleData['capacityKg'] as int))) {
+          throw const BusinessException(
+            'vehicle',
+            'Xe ngừng hoạt động hoặc chuyến hàng vượt tải trọng khai báo.',
+          );
+        }
+        final schedule = (p['scheduledAt'] as String? ?? '').trim();
+        if (schedule.isNotEmpty && DateTime.tryParse(schedule) == null) {
+          throw const BusinessException(
+            'validation',
+            'Lịch giao dùng dạng năm-tháng-ngày hoặc năm-tháng-ngàyTgiờ:phút.',
+          );
+        }
+        if ((p['latE6'] == null) != (p['lngE6'] == null)) {
+          throw const BusinessException(
+            'validation',
+            'Cần đủ vĩ độ và kinh độ.',
+          );
+        }
+        if (p['latE6'] != null) {
+          integerField(p, 'latE6', min: -90000000, max: 90000000);
+          integerField(p, 'lngE6', min: -180000000, max: 180000000);
+        }
+        final destination = {
+          ...old,
+          'driverId': driver,
+          'vehicleId': vehicle,
+          'vehiclePlate': vehicleData['plate'] ?? vehicle,
+          'loadKg': load,
+          'scheduledAt': schedule,
+          'address': p['address'] as String? ?? '',
+          if (p['latE6'] != null) 'latE6': p['latE6'],
+          if (p['lngE6'] != null) 'lngE6': p['lngE6'],
+        };
+        await _deliveryProjection(id, {...destination}, 'assigned');
+        return {...destination, 'deliveryStatus': 'assigned'};
+      case Operation.catalog:
+        final sku = textField(p, 'sku').toUpperCase(),
+            name = textField(p, 'name'),
+            unit = textField(p, 'unit');
+        final price = integerField(p, 'price', max: 1000000000000);
+        final catalogData = {...old, ...p};
+        ProductPolicy.validate(catalogData);
+        final trackingMode =
+            p['tracking'] as String? ?? old['tracking'] as String? ?? 'none';
+        if (!{'none', 'lot', 'serial'}.contains(trackingMode)) {
+          throw const BusinessException(
+            'validation',
+            'Chế độ theo dõi không hợp lệ.',
+          );
+        }
+        if (old.isNotEmpty && (old['tracking'] ?? 'none') != trackingMode) {
+          throw const BusinessException(
+            'locked',
+            'Không đổi chế độ lô/serial của mã hàng đã xác nhận; tạo mã hàng mới để tách tồn.',
+          );
+        }
+        if (sku.length > 128 || name.length > 300 || unit.length > 30) {
+          throw const BusinessException(
+            'validation',
+            'Mã, tên hoặc đơn vị quá dài.',
+          );
+        }
+        final index = await read('sku', sku);
+        if (index.isNotEmpty && index['productId'] != id) {
+          throw const BusinessException('duplicate', 'Mã hàng đã tồn tại.');
+        }
+        if (old.isNotEmpty && old['sku'] != sku) {
+          throw const BusinessException(
+            'locked',
+            'Không đổi SKU của hàng đã xác nhận.',
+          );
+        }
+        await store.writeProduct(
+          Product(id: id, sku: sku, name: name, unit: unit, price: price),
+        );
+        await _write('sku', sku, {'productId': id});
+        await _write(
+          'priceHistory',
+          '$id:${(old['version'] as int? ?? 0) + 1}',
+          {
+            'productId': id,
+            'price': price,
+            'priceLists': catalogData['priceLists'] ?? {},
+            'quantityTiers': catalogData['quantityTiers'] ?? [],
+            'changedBy': actor.uid,
+            'changedAt': DateTime.now().toUtc().toIso8601String(),
+          },
+        );
+        return {
+          ...old,
+          ...p,
+          'sku': sku,
+          'name': name,
+          'unit': unit,
+          'price': price,
+          'tracking': trackingMode,
+        };
+      case Operation.party:
+        final name = textField(p, 'name'), type = textField(p, 'type');
+        if (actor.role == StaffRole.sales &&
+            (p['priceList'] ?? old['priceList'] ?? '') !=
+                (old['priceList'] ?? '')) {
+          throw const BusinessException(
+            'permission',
+            'Quản lý phải duyệt việc thay đổi bảng giá khách hàng.',
+          );
+        }
+        if (!{'customer', 'supplier', 'both'}.contains(type)) {
+          throw const BusinessException(
+            'validation',
+            'Loại đối tác không hợp lệ.',
+          );
+        }
+        if (actor.role == StaffRole.sales && type != 'customer') {
+          throw const BusinessException(
+            'permission',
+            'Bán hàng chỉ được tạo khách hàng.',
+          );
+        }
+        final code = (p['code'] as String? ?? old['code'] as String? ?? '')
+            .trim()
+            .toUpperCase();
+        if (code.isNotEmpty) {
+          final index = await read('partyCode', code);
+          if (code.length > 128 ||
+              (index.isNotEmpty && index['partyId'] != id)) {
+            throw const BusinessException(
+              'duplicate',
+              'Mã đối tác bị trùng hoặc quá dài.',
+            );
+          }
+          if (old.isNotEmpty && old['code'] != null && old['code'] != code) {
+            throw const BusinessException(
+              'locked',
+              'Không đổi mã đối tác đã có.',
+            );
+          }
+          await _write('partyCode', code, {'partyId': id});
+        }
+        return {
+          ...old,
+          ...p,
+          'name': name,
+          'code': code,
+          'type': type,
+          'phone': p['phone'] as String? ?? '',
+          'address': p['address'] as String? ?? '',
+        };
       case Operation.transfer:
         _fresh(old);
         final from = textField(p, 'fromWarehouse'),
@@ -211,6 +931,7 @@ class AuthorityEngine {
           final product = textField(line, 'productId'),
               quantity = integerField(line, 'quantity', min: 1);
           final value = await _issue(from, product, quantity);
+          await tracking.move(from, to, line);
           await _stockChange(to, product, quantity, value);
         }
         return {...p, 'status': 'posted'};
@@ -230,6 +951,12 @@ class AuthorityEngine {
             'Phương thức hoặc số tiền chi trả không hợp lệ.',
           );
         }
+        await _write('supplierPayment', '$id:${old['version']}', {
+          ...p,
+          'supplierId': id,
+          'createdAt': DateTime.now().toUtc().toIso8601String(),
+          'storeSnapshot': await read('settings', 'store'),
+        });
         return {...old, 'balance': (old['balance'] as int) - amount};
       case Operation.returnSale:
         if (old.isEmpty) {
@@ -240,6 +967,7 @@ class AuthorityEngine {
             .map((l) => Map<String, dynamic>.from(l as Map))
             .toList();
         var credit = 0, restoredCost = 0;
+        final returnSnapshots = <Map<String, dynamic>>[];
         for (final returned in _lines(p)) {
           final matches = lines.where(
             (l) => l['productId'] == returned['productId'],
@@ -271,6 +999,12 @@ class AuthorityEngine {
                 original,
               ) -
               roundedRatio(target['cost'] as int, previous, original);
+          await tracking.returnGoods(
+            old['warehouse'] as String,
+            returned,
+            target,
+            id,
+          );
           await _stockChange(
             old['warehouse'] as String,
             target['productId'] as String,
@@ -279,12 +1013,31 @@ class AuthorityEngine {
             quality: 'quarantine',
           );
           target['returned'] = previous + quantity;
+          returnSnapshots.add({
+            ...returned,
+            'name': target['name'],
+            'sku': target['sku'],
+            'unit': target['unit'],
+            'unitPrice': target['unitPrice'],
+            'total': value,
+          });
           credit += value;
           restoredCost += cost;
         }
         final reduction = credit < (old['debt'] as int)
             ? credit
             : old['debt'] as int;
+        await _write('returnReceipt', '$id:${old['version']}', {
+          'saleId': id,
+          'customerId': old['customerId'],
+          'customerName': old['customerName'],
+          'storeSnapshot': old['storeSnapshot'],
+          'warehouse': old['warehouse'],
+          'reason': p['reason'],
+          'lines': returnSnapshots,
+          'total': credit,
+          'createdAt': DateTime.now().toUtc().toIso8601String(),
+        });
         final customer = old['customerId'] as String,
             receivable = await read('receivable', old['customerId'] as String);
         await _write('receivable', customer, {
@@ -312,6 +1065,14 @@ class AuthorityEngine {
             'Hoàn vượt số tiền được phép hoặc sai phương thức.',
           );
         }
+        await _write('refund', '$id:${old['version']}', {
+          ...p,
+          'saleId': id,
+          'customerId': old['customerId'],
+          'customerName': old['customerName'],
+          'storeSnapshot': old['storeSnapshot'],
+          'createdAt': DateTime.now().toUtc().toIso8601String(),
+        });
         return {
           ...old,
           'refundDue': due - amount,
@@ -319,6 +1080,7 @@ class AuthorityEngine {
         };
       case Operation.purchase:
         _fresh(old);
+        _date(p, 'expectedAt');
         final lines = _lines(p);
         textField(p, 'supplierId');
         textField(p, 'warehouse');
@@ -333,6 +1095,10 @@ class AuthorityEngine {
         }
         return {
           ...p,
+          'storeSnapshot': await read('settings', 'store'),
+          'supplierName':
+              (await read('party', p['supplierId'] as String))['name'] ??
+              p['supplierId'],
           'lines': [
             for (final l in lines) {...l, 'received': 0},
           ],
@@ -347,6 +1113,35 @@ class AuthorityEngine {
             .map((l) => Map<String, dynamic>.from(l as Map))
             .toList();
         int receiptValue = 0;
+        final fees = p['purchaseCosts'] == null
+            ? 0
+            : integerField(p, 'purchaseCosts');
+        var weightTotal = 0, accumulatedWeight = 0, allocatedFees = 0;
+        final weights = <String, int>{};
+        for (final receivedLine in received) {
+          final target = lines
+              .where((l) => l['productId'] == receivedLine['productId'])
+              .firstOrNull;
+          if (target == null) {
+            throw const BusinessException(
+              'validation',
+              'Hàng nhận không thuộc đơn mua.',
+            );
+          }
+          final weight = roundedRatio(
+            target['unitCost'] as int,
+            receivedLine['quantity'] as int,
+            1000,
+          );
+          weights[receivedLine['productId'] as String] = weight;
+          weightTotal += weight;
+        }
+        if (weightTotal == 0) {
+          for (final line in received) {
+            weights[line['productId'] as String] = line['quantity'] as int;
+            weightTotal += line['quantity'] as int;
+          }
+        }
         for (final l in received) {
           final matches = lines.where((x) => x['productId'] == l['productId']);
           if (matches.isEmpty) {
@@ -371,10 +1166,18 @@ class AuthorityEngine {
               'Trạng thái chất lượng không hợp lệ.',
             );
           }
-          final value = roundedRatio(
-            ordered['unitCost'] as int,
-            quantity,
-            1000,
+          accumulatedWeight += weights[l['productId']]!;
+          final nextFees = roundedRatio(fees, accumulatedWeight, weightTotal);
+          final value =
+              roundedRatio(ordered['unitCost'] as int, quantity, 1000) +
+              nextFees -
+              allocatedFees;
+          allocatedFees = nextFees;
+          await tracking.receive(
+            old['warehouse'] as String,
+            l,
+            old['supplierId'] as String,
+            id,
           );
           await _stockChange(
             old['warehouse'] as String,
@@ -387,6 +1190,15 @@ class AuthorityEngine {
           receiptValue += value;
         }
         final supplier = old['supplierId'] as String;
+        await _write('purchaseReceipt', '$id:${(old['version'] as int) + 1}', {
+          'purchaseId': id,
+          'supplierId': supplier,
+          'warehouse': old['warehouse'],
+          'lines': received,
+          'total': receiptValue,
+          'purchaseCosts': fees,
+          'receivedAt': DateTime.now().toUtc().toIso8601String(),
+        });
         final debt = await read('payable', supplier);
         await _write('payable', supplier, {
           'balance': (debt['balance'] as int? ?? 0) + receiptValue,
@@ -401,6 +1213,13 @@ class AuthorityEngine {
         };
       case Operation.sale:
         _fresh(old);
+        _date(p, 'dueAt');
+        if (p['quoteId'] != null && quoteSnapshot == null) {
+          throw const BusinessException(
+            'validation',
+            'Chuyển báo giá qua đúng nghiệp vụ chuyển đơn.',
+          );
+        }
         final lines = _lines(p);
         final warehouse = textField(p, 'warehouse');
         final customer = textField(p, 'customerId');
@@ -413,16 +1232,32 @@ class AuthorityEngine {
           }
           final quantity = integerField(l, 'quantity', min: 1, max: 1000000000);
           // Prices come from catalog; a client cannot forge their snapshot price.
-          final lineTotal = roundedRatio(product.price, quantity, 1000);
+          final quoted = quoteSnapshot == null
+              ? null
+              : (quoteSnapshot['lines'] as List)
+                    .cast<Map<String, dynamic>>()
+                    .firstWhere((q) => q['productId'] == product.id);
+          final price = quoted == null
+              ? (await _terms(product, l, customer))['unitPrice'] as int
+              : quoted['unitPrice'] as int;
+          if (quoted == null && integerField(l, 'expectedPrice') != price) {
+            throw const BusinessException(
+              'conflict',
+              'Giá hàng đã thay đổi. Đồng bộ và kiểm tra lại đơn.',
+            );
+          }
+          final lineTotal = roundedRatio(price, quantity, 1000);
+          await tracking.issue(warehouse, l, id);
           final lineCost = await _issue(warehouse, product.id, quantity);
           subtotal += lineTotal;
           cost += lineCost;
           snapshots.add({
             ...l,
-            'sku': product.sku,
-            'name': product.name,
-            'unit': product.unit,
-            'unitPrice': product.price,
+            if (quoted == null) ...await _terms(product, l, customer),
+            'sku': quoted?['sku'] ?? product.sku,
+            'name': quoted?['name'] ?? product.name,
+            'unit': quoted?['unit'] ?? product.unit,
+            'unitPrice': price,
             'total': lineTotal,
             'cost': lineCost,
             'delivered': 0,
@@ -436,6 +1271,7 @@ class AuthorityEngine {
           );
         }
         if (discount > 0 &&
+            quoteSnapshot?['discountApproved'] != true &&
             actor.role != StaffRole.admin &&
             actor.role != StaffRole.manager) {
           throw const BusinessException(
@@ -443,7 +1279,7 @@ class AuthorityEngine {
             'Chiết khấu cần quyền quản lý trong cấu hình hiện tại.',
           );
         }
-        final total = subtotal - discount;
+        final total = subtotal - discount + _surcharge(p);
         var cumulative = 0, allocatedDiscount = 0;
         for (final line in snapshots) {
           cumulative += line['total'] as int;
@@ -462,6 +1298,16 @@ class AuthorityEngine {
           ...p,
           'lines': snapshots,
           'total': total,
+          'surcharge': _surcharge(p),
+          'storeSnapshot':
+              quoteSnapshot?['storeSnapshot'] ??
+              await read('settings', 'store'),
+          'customerName':
+              quoteSnapshot?['customerName'] ??
+              (await read('party', customer))['name'] ??
+              customer,
+          'buyerSnapshot':
+              quoteSnapshot?['buyerSnapshot'] ?? await read('party', customer),
           'cost': cost,
           'paid': 0,
           'debt': total,
@@ -490,6 +1336,14 @@ class AuthorityEngine {
         final debt = await read('receivable', customer);
         await _write('receivable', customer, {
           'balance': (debt['balance'] as int) - amount,
+        });
+        await _write('payment', '$id:${old['version']}', {
+          ...p,
+          'saleId': id,
+          'customerId': customer,
+          'customerName': old['customerName'],
+          'storeSnapshot': old['storeSnapshot'],
+          'createdAt': DateTime.now().toUtc().toIso8601String(),
         });
         return {
           ...old,
@@ -530,13 +1384,25 @@ class AuthorityEngine {
           }
           target['delivered'] = next;
         }
-        return {
+        final status = lines.every((l) => l['quantity'] == l['delivered'])
+            ? 'delivered'
+            : 'partial';
+        final result = {
           ...old,
           'lines': lines,
-          'deliveryStatus': lines.every((l) => l['quantity'] == l['delivered'])
-              ? 'delivered'
-              : 'partial',
+          'deliveryStatus': status,
+          'driverId': p['driverId'],
+          'vehicleId': p['vehicleId'],
         };
+        await _write('deliveryTrip', '$id:${(old['version'] as int) + 1}', {
+          'saleId': id,
+          'driverId': actor.uid,
+          'vehicleId': p['vehicleId'],
+          'lines': delivered,
+          'deliveredAt': DateTime.now().toUtc().toIso8601String(),
+        });
+        await _deliveryProjection(id, result, status);
+        return result;
       case Operation.quarantine:
       case Operation.release:
         _fresh(old);
@@ -545,6 +1411,7 @@ class AuthorityEngine {
         final quantity = integerField(p, 'quantity', min: 1, max: 1000000000);
         textField(p, 'reason');
         if (op == Operation.quarantine) {
+          await tracking.move(warehouse, warehouse, p, toQuality: 'quarantine');
           final value = await _issue(warehouse, product, quantity);
           await _stockChange(
             warehouse,
@@ -554,6 +1421,12 @@ class AuthorityEngine {
             quality: 'quarantine',
           );
         } else {
+          await tracking.move(
+            warehouse,
+            warehouse,
+            p,
+            fromQuality: 'quarantine',
+          );
           final current = await stock(
             warehouse,
             product,
@@ -627,6 +1500,29 @@ class AuthorityEngine {
             'Đơn bán không thuộc khách hàng.',
           );
         }
+        if (p['productId'] != null) {
+          final line = (sale['lines'] as List)
+              .where((l) => l['productId'] == p['productId'])
+              .firstOrNull;
+          if (line == null || (line['returned'] ?? 0) == line['quantity']) {
+            throw const BusinessException(
+              'warranty',
+              'Hàng không thuộc đơn hoặc đã trả toàn bộ.',
+            );
+          }
+          if ((p['serial'] as String? ?? '').trim().isNotEmpty) {
+            final serial = textField(p, 'serial').toUpperCase();
+            final sold = await read('serial', serial);
+            if (sold['saleId'] != p['saleId'] ||
+                sold['status'] != 'sold' ||
+                sold['productId'] != p['productId']) {
+              throw const BusinessException(
+                'warranty',
+                'Serial không còn thuộc đơn bán này.',
+              );
+            }
+          }
+        }
         return {...p, 'status': 'received', 'cost': 0};
       case Operation.warrantyUpdate:
         if (old.isEmpty) {
@@ -652,6 +1548,110 @@ class AuthorityEngine {
         }
         return {...old, 'status': next, 'cost': integerField(p, 'cost')};
     }
+  }
+
+  Future<void> _deliveryProjection(
+    String id,
+    Map<String, dynamic> sale,
+    String status,
+  ) async {
+    await _write('delivery', id, {
+      'id': id,
+      'driverId': sale['driverId'],
+      'vehicleId': sale['vehicleId'],
+      'customerId': sale['customerId'],
+      'address': sale['address'] ?? '',
+      'scheduledAt': sale['scheduledAt'] ?? '',
+      'vehiclePlate': sale['vehiclePlate'] ?? sale['vehicleId'],
+      'loadKg': sale['loadKg'] ?? 0,
+      if (sale['latE6'] != null) 'latE6': sale['latE6'],
+      if (sale['lngE6'] != null) 'lngE6': sale['lngE6'],
+      'saleVersion': (sale['version'] as int) + 1,
+      'status': status,
+      'lines': [
+        for (final line in sale['lines'] as List)
+          {
+            'productId': line['productId'],
+            'name': line['name'],
+            'unit': line['unit'],
+            'quantity': line['quantity'],
+            'delivered': line['delivered'],
+          },
+      ],
+    });
+  }
+
+  Future<int> _available(String warehouse, String product) async {
+    final physical = (await stock(warehouse, product))['quantity'] as int? ?? 0;
+    final reserved =
+        (await read(
+              'reservedStock',
+              jsonEncode([warehouse, product]),
+            ))['quantity']
+            as int? ??
+        0;
+    return physical - reserved;
+  }
+
+  int _surcharge(Map<String, dynamic> payload) => payload['surcharge'] == null
+      ? 0
+      : integerField(payload, 'surcharge', max: 1000000000000);
+  void _date(Map<String, dynamic> payload, String key) {
+    final raw = payload[key] as String? ?? '';
+    if (raw.isNotEmpty && DateTime.tryParse(raw) == null) {
+      throw const BusinessException(
+        'validation',
+        'Ngày hẹn hoặc hạn nợ cần dạng năm-tháng-ngày.',
+      );
+    }
+  }
+
+  Future<Map<String, dynamic>> _terms(
+    Product product,
+    Map<String, dynamic> line,
+    String customer,
+  ) async {
+    final catalog = await read('catalog', product.id);
+    final party = await read('party', customer);
+    final selected = line['saleUnit'] as String? ?? product.unit;
+    final raw =
+        line['saleQuantity'] as int? ?? integerField(line, 'quantity', min: 1);
+    final base = ProductPolicy.baseQuantity(
+      catalog,
+      product.unit,
+      selected,
+      raw,
+    );
+    if (base != integerField(line, 'quantity', min: 1)) {
+      throw const BusinessException('unit', 'Số lượng gốc không khớp quy đổi.');
+    }
+    final priceList = party['priceList'] as String? ?? '';
+    final price = ProductPolicy.price(catalog, product.price, priceList, base);
+    return {
+      'unitPrice': price,
+      'taxConfiguration': catalog['tax'],
+      'saleUnit': selected,
+      'saleQuantity': raw,
+      'priceList': priceList,
+      'unitFactor': selected == product.unit
+          ? 1000
+          : (catalog['units'] as Map)[selected],
+    };
+  }
+
+  Future<void> _reserve(String warehouse, String product, int delta) async {
+    final id = jsonEncode([warehouse, product]);
+    final previous = await read('reservedStock', id);
+    final next = (previous['quantity'] as int? ?? 0) + delta;
+    final physical = (await stock(warehouse, product))['quantity'] as int? ?? 0;
+    if (next < 0 || next > physical) {
+      throw const BusinessException('stock', 'Tồn giữ chỗ không còn hợp lệ.');
+    }
+    await _write('reservedStock', id, {
+      'warehouse': warehouse,
+      'productId': product,
+      'quantity': next,
+    });
   }
 
   Future<void> _openShift(Map<String, dynamic> payload, {int sign = -1}) async {

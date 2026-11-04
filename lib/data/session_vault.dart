@@ -11,6 +11,18 @@ class SessionVault {
   final String storeId;
   SessionVault(this.storeId, {this.storage = const FlutterSecureStorage()});
   String get _key => 'bayhai.session.$storeId';
+  Future<Map<String, dynamic>?> readData(String name) async {
+    final value = await storage.read(key: '$_key.$name');
+    if (value == null) return null;
+    try {
+      return jsonDecode(value) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> writeData(String name, Map<String, dynamic> value) =>
+      storage.write(key: '$_key.$name', value: jsonEncode(value));
   Future<void> write(AuthSession session) => storage.write(
     key: _key,
     value: jsonEncode({
@@ -37,5 +49,8 @@ class SessionVault {
     }
   }
 
-  Future<void> clear() => storage.delete(key: _key);
+  Future<void> clear() async {
+    await storage.delete(key: _key);
+    await storage.delete(key: '$_key.profile');
+  }
 }

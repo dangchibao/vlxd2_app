@@ -22,6 +22,9 @@
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#0055d9">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="VLXD Bảy Hải">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
@@ -42,6 +45,27 @@
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
   <script src="flutter_bootstrap.js" async></script>
+  <script>
+    if ('serviceWorker' in navigator && window.isSecureContext) {
+      window.addEventListener('load', () => {
+        let applying = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => { if (applying) location.reload(); });
+        navigator.serviceWorker.register('offline-worker.js').then(registration => {
+          const offer = () => {
+            if (!registration.waiting || !navigator.serviceWorker.controller || document.getElementById('bayhai-update')) return;
+            const button = document.createElement('button');
+            button.id = 'bayhai-update';
+            button.textContent = 'Có bản mới — lưu nháp rồi bấm tải lại';
+            button.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:10000;padding:14px;border:0;border-radius:8px;background:#0055d9;color:white;font-size:15px;cursor:pointer';
+            button.onclick = () => { applying = true; registration.waiting?.postMessage('BAYHAI_APPLY_UPDATE'); };
+            document.body.appendChild(button);
+          };
+          offer();
+          registration.addEventListener('updatefound', () => registration.installing?.addEventListener('statechange', offer));
+        }).catch(() => { /* Development builds have no generated offline asset manifest. */ });
+      });
+    }
+  </script>
 </body>
 </html>
 

@@ -1,3 +1,19 @@
+# Cập nhật source 0.3 — 05/11/2026
+
+Đang triển khai tiếp theo quyền tự chủ người dùng đã cấp. Chưa đánh dấu V1.0 hoàn thành. Các mục bên dưới phần này là nhật ký lịch sử, không thay cho trạng thái mới.
+
+Đã nối Auth/session, cache riêng theo UID, sync outbox/receipt/event/checkpoint và trạm Windows vào UI. Có danh mục đa ngành, bảng giá/giá số lượng/quy đổi, đối tác, báo giá có phiên bản, bán/thu nợ, mua/nhận nhiều đợt và phí mua NCC, kho/giữ hàng/duyệt vượt tồn, kiểm kê, lô/serial, trả hàng/cách ly/hoàn tiền, bảo hành cơ bản, xe/lịch giao/bản đồ, thu chi/chốt ca, báo cáo, Excel, backup mã hóa/restore và tìm kiếm.
+
+Đã thêm in từ chứng từ xác nhận, các phiếu thu/chi/nhập/trả/kiểm kê riêng, nhật ký PDF và yêu cầu in điện thoại qua claim tại trạm. Có cấu trúc chuẩn bị hóa đơn điện tử; không tự phát hành hoặc chọn thuế suất. Worker PWA chỉ cache tài nguyên app, không cache API.
+
+Kiểm tra gần nhất: analyze sạch, 72 unit/widget đạt, test tích hợp emulator được chạy riêng; 10 Rules + 1 tích hợp Auth/Firestore REST đạt ở lượt emulator trước các bổ sung phiếu in cuối. Node test worker offline đạt. Sẽ kiểm tra lại build và tích hợp trước khi ghi kết quả bàn giao.
+
+Firebase mới đã tạo: vlxd-bayhai-v1-261105, Firestore Native miễn phí tại asia-southeast1. Chưa gắn Billing/Blaze, chưa bật Functions/Storage, chưa sửa project cũ. Auth chưa khởi tạo; đang chờ thao tác Get started/Email-Password trong Console của chủ Google. Tool quản trị và cấu hình public đã chuẩn bị; chưa tạo tài khoản cloud hoặc deploy Hosting. Xem RUNNING_AND_SETUP.md.
+
+Còn cần hoàn thiện/kiểm chứng: combo/lắp bộ, báo cáo chi tiết và biểu đồ, một số quy trình hàng hỏng/bảo hành nâng cao, ảnh và liên kết tìm kiếm/biên tập, trải nghiệm quét barcode camera, QA toàn bộ màn hình mới, build 0.3, hiệu năng dữ liệu lớn và thiết bị thật Android/iPhone/KV804. Bản build 0.2 phía dưới là bản cũ.
+
+---
+
 # Trạng thái triển khai — 05/11/2026
 
 ## Cập nhật tiếp tục triển khai (source 0.2.0)

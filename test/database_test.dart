@@ -84,6 +84,9 @@ void main() {
       ]) {
         await legacy.customStatement('DROP TABLE $table');
       }
+      await legacy.customStatement(
+        'DROP INDEX IF EXISTS idx_queue_actor_status',
+      );
       for (final column in [
         'actor_uid',
         'operation',

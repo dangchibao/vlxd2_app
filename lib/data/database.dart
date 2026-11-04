@@ -118,11 +118,11 @@ class PrintJobs extends Table {
   ],
 )
 class AppDatabase extends _$AppDatabase {
-  AppDatabase([QueryExecutor? executor])
+  AppDatabase([QueryExecutor? executor, String name = 'bayhai_v1'])
     : super(
         executor ??
             driftDatabase(
-              name: 'bayhai_v1',
+              name: name,
               web: DriftWebOptions(
                 sqlite3Wasm: Uri.parse('sqlite3.wasm'),
                 driftWorker: Uri.parse('drift_worker.dart.js'),
@@ -152,6 +152,12 @@ class AppDatabase extends _$AppDatabase {
     },
     beforeOpen: (_) async {
       await customStatement('PRAGMA foreign_keys = ON');
+      await customStatement(
+        'CREATE INDEX IF NOT EXISTS idx_business_kind_id ON business_records (kind,id)',
+      );
+      await customStatement(
+        'CREATE INDEX IF NOT EXISTS idx_queue_actor_status ON outbox (actor_uid,status,created_at)',
+      );
     },
   );
   Stream<List<Product>> watchProducts() =>
@@ -198,6 +204,7 @@ class AppDatabase extends _$AppDatabase {
     String id,
     Map<String, dynamic> payload, {
     bool submit = false,
+    bool createOutbox = true,
   }) => transaction(() async {
     final existing = await (select(
       drafts,
@@ -215,7 +222,7 @@ class AppDatabase extends _$AppDatabase {
         updatedAt: DateTime.now(),
       ),
     );
-    if (submit) {
+    if (submit && createOutbox) {
       await into(outbox).insert(
         OutboxCompanion.insert(
           id: const Uuid().v4(),

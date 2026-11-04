@@ -16,7 +16,13 @@ class RemoteDocument {
   final String name;
   final Map<String, dynamic> data;
   final String? updateTime;
-  const RemoteDocument(this.name, this.data, this.updateTime);
+  final Map<String, dynamic> rawFields;
+  const RemoteDocument(
+    this.name,
+    this.data,
+    this.updateTime, {
+    this.rawFields = const {},
+  });
 }
 
 class FirestoreRest {
@@ -41,6 +47,47 @@ class FirestoreRest {
     }
   }
   String get root => 'projects/$projectId/databases/(default)/documents';
+  Future<List<RemoteDocument>> query(
+    String parent,
+    Map<String, dynamic> structuredQuery,
+    AuthSession session,
+  ) async {
+    try {
+      final response = await client
+          .post(
+            _uri('${name(parent)}:runQuery'),
+            headers: {
+              'Authorization': 'Bearer ${session.idToken}',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({'structuredQuery': structuredQuery}),
+          )
+          .timeout(const Duration(seconds: 25));
+      if (response.statusCode != 200) {
+        throw FirestoreFailure(response.statusCode);
+      }
+      final body = jsonDecode(response.body);
+      final rows = body is List ? body : [body];
+      return [
+        for (final row in rows)
+          if (row['document'] is Map<String, dynamic>)
+            RemoteDocument(
+              row['document']['name'] as String,
+              decodeFields(
+                row['document']['fields'] as Map<String, dynamic>? ?? {},
+              ),
+              row['document']['updateTime'] as String?,
+              rawFields:
+                  row['document']['fields'] as Map<String, dynamic>? ?? {},
+            ),
+      ];
+    } on FirestoreFailure {
+      rethrow;
+    } catch (_) {
+      throw const FirestoreFailure(503);
+    }
+  }
+
   String name(String relative) {
     final segments = relative.split('/');
     if (segments.length.isOdd ||

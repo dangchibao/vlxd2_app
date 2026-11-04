@@ -31,6 +31,7 @@ void main() {
     'productId': product,
     'quantity': q,
     'unitCost': cost,
+    'expectedPrice': 20000,
     'quality': ?quality,
   };
   Future<void> receive(
@@ -357,5 +358,75 @@ void main() {
     }, version: payable['version'] as int);
     expect((await engine.read('payable', 'supplier'))['balance'], 60000);
     expect((await engine.stock('main', product))['quantity'], 10000);
+  });
+  test(
+    'Changed catalog price rejects stale sale without touching stock',
+    () async {
+      await receive(1000);
+      await expectLater(
+        apply(Operation.sale, 'stale', {
+          'warehouse': 'main',
+          'customerId': 'customer',
+          'discount': 0,
+          'lines': [
+            {...item(1000), 'expectedPrice': 19000},
+          ],
+        }),
+        throwsA(isA<BusinessException>()),
+      );
+      expect((await engine.stock('main', product))['quantity'], 1000);
+    },
+  );
+  test(
+    'Quote conversion preserves agreed price and cannot issue stock twice',
+    () async {
+      await receive(1000);
+      await apply(Operation.quote, 'quote', {
+        'customerId': 'customer',
+        'discount': 1000,
+        'lines': [item(1000)],
+      });
+      await apply(Operation.catalog, product, {
+        'sku': 'A',
+        'name': 'Tên mới',
+        'unit': 'viên',
+        'price': 30000,
+      });
+      final converted = await apply(
+        Operation.quoteToSale,
+        'quote',
+        {'saleId': 'from-quote', 'warehouse': 'main'},
+        version: 1,
+        actor: const Actor('seller', StaffRole.sales),
+      );
+      expect((converted['saleDocument'] as Map)['total'], 19000);
+      expect(
+        ((converted['saleDocument'] as Map)['lines'] as List).single['name'],
+        'Gạch',
+      );
+      expect((await engine.stock('main', product))['quantity'], 0);
+      await expectLater(
+        apply(Operation.quoteToSale, 'quote', {
+          'saleId': 'duplicate',
+          'warehouse': 'main',
+        }, version: 2),
+        throwsA(isA<BusinessException>()),
+      );
+      expect(await engine.read('sale', 'duplicate'), isEmpty);
+    },
+  );
+  test('Quote revisions retain immutable historical snapshots', () async {
+    await apply(Operation.quote, 'quote', {
+      'customerId': 'customer',
+      'discount': 0,
+      'lines': [item(1000)],
+    });
+    await apply(Operation.quote, 'quote', {
+      'customerId': 'customer',
+      'discount': 0,
+      'lines': [item(2000)],
+    }, version: 1);
+    expect((await engine.read('quoteVersion', 'quote:1'))['total'], 20000);
+    expect((await engine.read('quoteVersion', 'quote:2'))['total'], 40000);
   });
 }

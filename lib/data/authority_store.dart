@@ -19,11 +19,46 @@ abstract interface class AuthorityStore {
     Map<String, dynamic> payload,
   );
   Future<Product?> product(String id);
+  Future<void> writeProduct(Product product);
+  Future<Map<String, dynamic>?> member(String uid);
+  Future<void> writeMember(String uid, Map<String, dynamic> data);
 }
 
 class DriftAuthorityStore implements AuthorityStore {
   final AppDatabase db;
   DriftAuthorityStore(this.db);
+  @override
+  Future<Map<String, dynamic>?> member(String uid) async {
+    final row = await record('staff', uid);
+    return row == null ? null : jsonDecode(row.payload) as Map<String, dynamic>;
+  }
+
+  @override
+  Future<void> writeMember(String uid, Map<String, dynamic> data) async {
+    final old = await record('staff', uid);
+    await writeRecord(
+      BusinessRecord(
+        id: 'staff:$uid',
+        kind: 'staff',
+        payload: jsonEncode(data),
+        version: (old?.version ?? 0) + 1,
+      ),
+    );
+  }
+
+  @override
+  Future<void> writeProduct(Product product) => db
+      .into(db.products)
+      .insertOnConflictUpdate(
+        ProductsCompanion.insert(
+          id: product.id,
+          sku: product.sku,
+          name: product.name,
+          unit: product.unit,
+          price: product.price,
+        ),
+      )
+      .then((_) {});
   @override
   Future<T> transaction<T>(Future<T> Function() action) =>
       db.transaction(action);

@@ -12,14 +12,19 @@ service cloud.firestore {
     }
     function station(store) { return member(store) && role(store) == 'station'; }
     function operationAllowed(store, operation) {
-      return role(store) in ['admin', 'manager'] ||
-        (role(store) == 'sales' && operation in ['sale','payment','warranty']) ||
-        (role(store) == 'warehouse' && operation in ['purchase','receive','quarantine','warrantyUpdate']) ||
-        (role(store) == 'driver' && operation == 'delivery');
+      return role(store) == 'admin' || (role(store) == 'manager' && operation != 'staff') ||
+        (role(store) == 'sales' && operation in ['printRequest','reservation','cancelReservation','fulfillReservation','quote','quoteToSale','sale','payment','warranty','party']) ||
+        (role(store) == 'warehouse' && operation in ['printRequest','catalog','purchase','receive','quarantine','warrantyUpdate']) ||
+        (role(store) == 'driver' && operation in ['delivery','printRequest']);
     }
     match /stores/{store}/members/{uid} {
-      allow get: if request.auth != null && (request.auth.uid == uid || station(store));
-      allow list, create, update, delete: if false;
+      allow get: if request.auth != null && (request.auth.uid == uid || station(store) || (member(store) && role(store) in ['admin','manager']));
+      allow list: if member(store) && role(store) in ['admin','manager'];
+      allow update: if station(store) && uid != request.auth.uid && resource.data.role != 'station' &&
+        request.resource.data.role in ['admin','manager','sales','warehouse','driver'] &&
+        request.resource.data.active is bool &&
+        request.resource.data.mustChangePassword == resource.data.mustChangePassword;
+      allow create, delete: if false;
     }
     match /stores/{store}/commands/{id} {
       allow create: if member(store) && operationAllowed(store, request.resource.data.operation) &&
@@ -33,6 +38,12 @@ service cloud.firestore {
         request.resource.data.payload is map && request.resource.data.createdAt == request.time;
       allow read: if member(store) && (station(store) || request.auth.uid == resource.data.actorUid || role(store) in ['admin','manager']);
       allow update, delete: if false;
+    }
+    match /stores/{store}/receipts/{id} {
+      allow read: if member(store) && (role(store) != 'driver' || resource.data.actorUid == request.auth.uid);
+    }
+    match /stores/{store}/documents/{id} {
+      allow read: if member(store) && role(store)=='driver' && resource.data.kind=='delivery' && resource.data.payload.driverId==request.auth.uid;
     }
     // Business processing belongs to a trusted, separately provisioned station.
     // These Rules do not validate costing/accounting inside a station payload.

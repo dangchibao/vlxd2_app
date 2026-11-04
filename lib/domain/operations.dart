@@ -3,6 +3,22 @@ import 'dart:convert';
 enum StaffRole { admin, manager, sales, warehouse, driver }
 
 enum Operation {
+  settings,
+  printRequest,
+  printClaim,
+  printResult,
+  vehicle,
+  staff,
+  inventoryCount,
+  reservation,
+  approveReservation,
+  cancelReservation,
+  fulfillReservation,
+  quote,
+  quoteToSale,
+  assignDelivery,
+  catalog,
+  party,
   transfer,
   returnSale,
   refund,
@@ -39,19 +55,29 @@ class Actor {
   });
   void require(Operation operation) {
     final allowed = switch (role) {
-      StaffRole.admin || StaffRole.manager => Operation.values.toSet(),
+      StaffRole.admin => Operation.values.toSet(),
+      StaffRole.manager => Operation.values.toSet()..remove(Operation.staff),
       StaffRole.sales => {
+        Operation.printRequest,
+        Operation.reservation,
+        Operation.cancelReservation,
+        Operation.fulfillReservation,
+        Operation.quote,
+        Operation.quoteToSale,
+        Operation.party,
         Operation.sale,
         Operation.payment,
         Operation.warranty,
       },
       StaffRole.warehouse => {
+        Operation.printRequest,
+        Operation.catalog,
         Operation.purchase,
         Operation.receive,
         Operation.quarantine,
         Operation.warrantyUpdate,
       },
-      StaffRole.driver => {Operation.delivery},
+      StaffRole.driver => {Operation.delivery, Operation.printRequest},
     };
     if (!active || mustChangePassword || !allowed.contains(operation)) {
       throw const BusinessException(
