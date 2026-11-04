@@ -1,4 +1,7 @@
 # Miscellaneous
+# Local build packages and Kotlin compiler cache
+/dist/
+/android/.kotlin/
 *.class
 *.log
 *.pyc

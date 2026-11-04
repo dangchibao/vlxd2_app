@@ -23,8 +23,10 @@ nguyên/overpayment, SKU unique + rollback audit, đồng thời gửi đơn ch�
 outbox, mở lại database còn dữ liệu, render catalog, reactive quantity không
 chờ blur và không hiển thị tổng hợp lệ khi quantity rỗng.
 
-Windows release đã build; Web release đã build. Trạng thái APK được cập nhật
-sau khi Gradle kết thúc. Build không thay thế smoke test trên thiết bị thật.
+Windows release, Web release và APK Android release đã build thành công.
+Build không thay thế smoke test trên thiết bị thật. Windows đã được đóng gói
+trong `dist/VLXD-Bay-Hai-Windows-dev.zip` (giải nén toàn bộ rồi chạy exe).
+APK ở `build/app/outputs/flutter-apk/app-release.apk`.
 
 ## Phần còn thiếu — chưa được coi là hoàn thành
 
