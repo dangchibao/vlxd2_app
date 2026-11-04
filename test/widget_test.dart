@@ -1,3 +1,4 @@
+import 'package:vlxd_bay_hai/features/material_calculator.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -45,5 +46,38 @@ void main() {
     await tester.pump();
     expect(find.text('Tổng tiền: 285.000 đ'), findsNothing);
     await tester.pumpWidget(const SizedBox());
+  });
+  testWidgets(
+    'Material calculator reacts to decimal area without losing focus',
+    (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: MaterialCalculator())),
+      );
+      expect(find.text('Đề xuất: 8 thùng'), findsOneWidget);
+      await tester.enterText(find.byType(TextField).first, '20');
+      await tester.pump();
+      expect(find.text('Đề xuất: 15 thùng'), findsOneWidget);
+      expect(parseFixed('1,44', 6), 1440000);
+    },
+  );
+  testWidgets('Mobile workspace fits a narrow phone without overflow', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          productsProvider.overrideWith((_) => Stream.value([])),
+          draftsProvider.overrideWith((_) => Stream.value([])),
+          queueProvider.overrideWith((_) => Stream.value([])),
+        ],
+        child: const MaterialApp(home: Workspace()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
   });
 }

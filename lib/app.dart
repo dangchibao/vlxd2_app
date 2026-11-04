@@ -9,6 +9,8 @@ import 'package:uuid/uuid.dart';
 
 import 'data/database.dart';
 import 'domain/sale.dart';
+import 'features/material_calculator.dart';
+import 'features/receipt_preview.dart';
 
 final databaseProvider = Provider<AppDatabase>((ref) {
   final db = AppDatabase();
@@ -62,13 +64,21 @@ class Workspace extends ConsumerStatefulWidget {
 
 class _WorkspaceState extends ConsumerState<Workspace> {
   int page = 0;
-  final labels = ['Tổng quan', 'Hàng hóa', 'Bán hàng', 'Đơn đã lưu', 'Đồng bộ'];
+  final labels = [
+    'Tổng quan',
+    'Hàng hóa',
+    'Bán hàng',
+    'Đơn đã lưu',
+    'Đồng bộ',
+    'Tính vật liệu',
+  ];
   final icons = [
     Icons.dashboard_outlined,
     Icons.inventory_2_outlined,
     Icons.shopping_cart_outlined,
     Icons.receipt_long_outlined,
     Icons.sync,
+    Icons.calculate_outlined,
   ];
   @override
   Widget build(BuildContext context) {
@@ -80,6 +90,7 @@ class _WorkspaceState extends ConsumerState<Workspace> {
         SaleEditor(),
         DraftList(),
         QueueView(),
+        MaterialCalculator(),
       ],
     );
     return Scaffold(
@@ -90,11 +101,20 @@ class _WorkspaceState extends ConsumerState<Workspace> {
           'VLXD Bảy Hải',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
-        actions: const [
-          Padding(
-            padding: EdgeInsets.all(16),
-            child: Text('Cục bộ • Chưa kết nối Firebase'),
-          ),
+        actions: [
+          if (MediaQuery.sizeOf(context).width >= 800)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Cục bộ • Chưa kết nối Firebase'),
+            )
+          else
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: Tooltip(
+                message: 'Cục bộ • Chưa kết nối Firebase',
+                child: Icon(Icons.cloud_off_outlined),
+              ),
+            ),
         ],
       ),
       body: LayoutBuilder(
@@ -115,6 +135,13 @@ class _WorkspaceState extends ConsumerState<Workspace> {
                         onTap: () => setState(() => page = i),
                       ),
                     const Spacer(),
+                    TextButton(
+                      onPressed: () => showLicensePage(
+                        context: context,
+                        applicationName: 'VLXD Bảy Hải',
+                      ),
+                      child: const Text('Giấy phép phần mềm'),
+                    ),
                     const Padding(
                       padding: EdgeInsets.all(16),
                       child: Text('Bản phát triển\nChưa dùng ghi sổ thực tế'),
@@ -128,14 +155,34 @@ class _WorkspaceState extends ConsumerState<Workspace> {
           ],
         ),
       ),
-      bottomNavigationBar: MediaQuery.sizeOf(context).width < 800
-          ? NavigationBar(
-              selectedIndex: page,
-              onDestinationSelected: (i) => setState(() => page = i),
-              destinations: [
-                for (var i = 0; i < labels.length; i++)
-                  NavigationDestination(icon: Icon(icons[i]), label: labels[i]),
-              ],
+      drawer: MediaQuery.sizeOf(context).width < 800
+          ? Drawer(
+              child: SafeArea(
+                child: ListView(
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.all(20),
+                      child: Text(
+                        'VLXD Bảy Hải',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    for (var i = 0; i < labels.length; i++)
+                      ListTile(
+                        leading: Icon(icons[i]),
+                        title: Text(labels[i]),
+                        selected: page == i,
+                        onTap: () {
+                          setState(() => page = i);
+                          Navigator.pop(context);
+                        },
+                      ),
+                  ],
+                ),
+              ),
             )
           : null,
     );
@@ -700,6 +747,23 @@ class _SaleEditorState extends ConsumerState<SaleEditor> {
                     },
               child: const Text('Gửi chờ xác nhận'),
             ),
+            OutlinedButton.icon(
+              onPressed: t == null || lines.isEmpty
+                  ? null
+                  : () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => ReceiptPreview(
+                          database: ref.read(databaseProvider),
+                          documentId: id,
+                          customer: customer.text,
+                          lines: List.unmodifiable(lines),
+                          totals: t,
+                        ),
+                      ),
+                    ),
+              icon: const Icon(Icons.print_outlined),
+              label: const Text('Xem phiếu K80'),
+            ),
             if (submitted)
               OutlinedButton(
                 onPressed: () => setState(() {
@@ -795,7 +859,11 @@ class QueueView extends ConsumerWidget {
                 child: ListTile(
                   leading: const Icon(Icons.cloud_off),
                   title: Text(item.aggregateId.substring(0, 8)),
-                  subtitle: Text('Chờ đồng bộ • Số lần thử: ${item.attempts}'),
+                  subtitle: Text(
+                    item.actorUid == null
+                        ? 'Đơn thử cục bộ, chưa gắn tài khoản đồng bộ.'
+                        : '${item.status} • Số lần thử: ${item.attempts}',
+                  ),
                 ),
               ),
           ],

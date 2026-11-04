@@ -61,4 +61,56 @@ void main() {
     await reopened.close();
     await directory.delete(recursive: true);
   });
+  test(
+    'Version 1 local data migrates to version 4 without losing pending drafts',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'bayhai_migration_',
+      );
+      final file = File('${directory.path}/legacy.sqlite');
+      final legacy = AppDatabase(NativeDatabase(file));
+      await legacy.addProduct('LEGACY', 'Hàng cũ', 'bao', 10000);
+      await legacy.saveDraft('legacy-order', {
+        'customer': 'Khách cũ',
+      }, submit: true);
+      // Only manipulate this freshly created temporary test fixture.
+      for (final table in [
+        'business_records',
+        'command_receipts',
+        'business_events',
+        'sync_checkpoints',
+        'inbox_events',
+        'print_jobs',
+      ]) {
+        await legacy.customStatement('DROP TABLE $table');
+      }
+      for (final column in [
+        'actor_uid',
+        'operation',
+        'expected_version',
+        'next_attempt_at',
+        'last_error',
+      ]) {
+        await legacy.customStatement('ALTER TABLE outbox DROP COLUMN $column');
+      }
+      await legacy.customStatement('PRAGMA user_version = 1');
+      await legacy.close();
+      final upgraded = AppDatabase(NativeDatabase(file));
+      expect(
+        (await upgraded.select(upgraded.products).get()).single.sku,
+        'LEGACY',
+      );
+      expect(
+        (await upgraded.select(upgraded.outbox).get()).single.actorUid,
+        isNull,
+      );
+      expect(
+        (await upgraded.select(upgraded.drafts).get()).single.id,
+        'legacy-order',
+      );
+      expect(await upgraded.select(upgraded.businessEvents).get(), isEmpty);
+      await upgraded.close();
+      await directory.delete(recursive: true);
+    },
+  );
 }

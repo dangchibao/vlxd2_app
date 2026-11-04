@@ -1,5 +1,5 @@
 name: vlxd_bay_hai
-description: "A new Flutter project."
+description: "Quản lý cửa hàng VLXD Bảy Hải — đang phát triển"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+1
+version: 0.2.0+2
 
 environment:
   sdk: ^3.13.5
@@ -40,6 +40,10 @@ dependencies:
   drift_flutter: ^0.3.1
   uuid: ^4.6.0
   intl: ^0.20.3
+  http: ^1.6.0
+  flutter_secure_storage: ^11.2.0
+  printing: ^5.15.1
+  pdf: ^3.13.1
 
 dev_dependencies:
   flutter_test:
@@ -64,6 +68,9 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+  assets:
+    - assets/fonts/NotoSans-Regular.ttf
+    - assets/fonts/OFL.txt
 
   # To add assets to your application, add an assets section, like this:
   # assets:
@@ -95,3 +102,4 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+

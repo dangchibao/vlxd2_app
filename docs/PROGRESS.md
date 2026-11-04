@@ -1,5 +1,56 @@
 # Trạng thái triển khai — 05/11/2026
 
+## Cập nhật tiếp tục triển khai (source 0.2.0)
+
+Phần bên dưới mục này là nhật ký bản nền tảng trước; trạng thái mới được ghi ở
+đây. Chưa đánh dấu V1.0 hoàn thành.
+
+Đã thêm schema 4 và migration giữ lại catalog/đơn nháp/outbox bản 1. Có bảng
+business records, command receipts, business events, checkpoint/inbox và print jobs.
+
+Lõi nghiệp vụ có transaction, kiểm quyền, expectedVersion, idempotency và event:
+đặt mua/nhận từng đợt, tồn tốt/cách ly, bình quân liên hoàn, bán không âm tồn,
+thu nhiều lần, giao nhiều chuyến, chuyển kho, trả hàng/hoàn tiền, trả NCC,
+thu chi/chốt ca và state machine bảo hành cơ bản. Số lượng lõi dùng scale 1000;
+UI nháp cũ vẫn dùng số nguyên. Đây là **lõi có test**, chưa phải toàn bộ phân hệ
+UI đã hoạt động cho người sử dụng.
+
+Cùng bộ xử lý có adapter SQLite và Firestore REST. Adapter cloud stage writes
+rồi commit chứng từ, tồn/nợ, receipt và event trong cùng transaction; không lấy
+SQLite làm bằng chứng cloud đã xác nhận. Actor của command được trạm kiểm tra
+lại từ membership bên trong transaction. Rejection có receipt riêng; không
+chuyển lỗi thành xác nhận thành công.
+
+Sync engine có enqueue transactional, kiểm command trùng, receipt trước retry,
+backoff/jitter, conflict/error, giới hạn batch và apply event/checkpoint nguyên tử.
+Chưa nối uploader, polling và tải catalog vào giao diện đang chạy. Legacy outbox
+không có actor được giữ nguyên, không tự gửi dưới danh nghĩa người đăng nhập sau.
+
+Auth REST có sign-in/refresh/change-password, từ chối emulator từ xa, thông báo
+lỗi không lộ token; SessionVault dùng secure-storage. Chưa nối màn hình đăng nhập,
+bootstrap admin, xác minh đổi mật khẩu đầu tiên và quản lý nhân viên vào app.
+
+Firestore Rules và 7 ca emulator đã đạt. Kiểm thử tích hợp Auth + Firestore REST
+đã đạt trên emulator: đổi mật khẩu, token refresh, stale precondition, command
+replay và hai bộ xử lý cloud cùng tranh tồn cuối (một xác nhận, một lỗi).
+Không tạo Firebase thật và không deploy Rules lên cloud.
+
+UI có thêm công cụ tính gạch tức thì và xem phiếu tạm K80. Font Noto Sans được
+nhúng (OFL kèm source), có nhật ký gửi in và chặn gửi lại cùng job ID. Khi kết quả
+không rõ, cần đối chiếu giấy thực tế. Chưa thử KV804 thật, chưa có mobile print
+request tới trạm và chưa đủ mọi loại mẫu phiếu.
+
+Kiểm thử mobile phát hiện tràn thanh điều hướng ở 390px, đã sửa bằng drawer.
+Chưa dùng kết quả widget test để tuyên bố đã kiểm thử iPhone thật.
+
+Đầu việc còn lại lớn nhất: nối Auth/session với UI và đồng bộ/trạm chạy nền;
+hoàn thiện các màn hình nghiệp vụ; danh mục đối tác/bảng giá/quy đổi/thuộc tính;
+lô/serial, giữ hàng/duyệt vượt tồn; báo giá; bản đồ/xe/tài xế; báo cáo/Excel;
+backup/restore; tìm kiếm toàn hệ thống; hóa đơn DTO; QA thiết bị và hiệu năng.
+Các adapter mới không được coi là chứng nhận bảo mật production.
+
+## Nhật ký bản nền tảng ban đầu
+
 Người dùng đã cho phép chủ động triển khai hướng miễn phí sau audit. Không cần
 xin duyệt lại từng thay đổi thông thường. Không tạo hoặc sửa Firebase thật,
 không deploy, không bật billing trong phiên triển khai này.

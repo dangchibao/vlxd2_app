@@ -1,0 +1,91 @@
+import 'dart:typed_data';
+
+import 'package:drift/native.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:vlxd_bay_hai/data/database.dart';
+import 'package:vlxd_bay_hai/data/receipt_printer.dart';
+import 'package:vlxd_bay_hai/domain/sale.dart';
+
+class FakePrinter implements PrinterAdapter {
+  int calls = 0;
+  bool fail = false;
+  @override
+  Future<bool> send(Uint8List pdf) async {
+    calls++;
+    if (fail) throw StateError('Disconnected after submission');
+    return true;
+  }
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  test('K80 receipt embeds Vietnamese font and renders PDF', () async {
+    const line = SaleLine(
+      productId: 'a',
+      sku: 'A',
+      name: 'Gạch lát nền Bảy Hải',
+      unit: 'thùng',
+      price: 200000,
+      quantity: 2,
+    );
+    final bytes = await ReceiptRenderer().render(
+      documentId: 'draft-1',
+      lines: [line],
+      customer: 'Nguyễn Thị Ánh',
+      totals: SaleTotals([line]),
+    );
+    expect(String.fromCharCodes(bytes.take(4)), '%PDF');
+    expect(bytes.length, greaterThan(5000));
+  });
+  test('Duplicate print ID invokes physical adapter only once', () async {
+    final db = AppDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final adapter = FakePrinter();
+    final printer = ReceiptPrinter(db, adapter);
+    await printer.print(
+      jobId: 'one',
+      documentId: 'sale',
+      bytes: Uint8List.fromList([1]),
+    );
+    await expectLater(
+      printer.print(
+        jobId: 'one',
+        documentId: 'sale',
+        bytes: Uint8List.fromList([1]),
+      ),
+      throwsStateError,
+    );
+    expect(adapter.calls, 1);
+    expect(
+      (await db.select(db.printJobs).get()).single.status,
+      'sent_to_system',
+    );
+  });
+  test(
+    'Ambiguous print failure is persisted and not automatically retried',
+    () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      addTearDown(db.close);
+      final adapter = FakePrinter()..fail = true;
+      final printer = ReceiptPrinter(db, adapter);
+      await expectLater(
+        printer.print(
+          jobId: 'one',
+          documentId: 'sale',
+          bytes: Uint8List.fromList([1]),
+        ),
+        throwsStateError,
+      );
+      expect((await db.select(db.printJobs).get()).single.status, 'unknown');
+      await expectLater(
+        printer.print(
+          jobId: 'one',
+          documentId: 'sale',
+          bytes: Uint8List.fromList([1]),
+        ),
+        throwsStateError,
+      );
+      expect(adapter.calls, 1);
+    },
+  );
+}

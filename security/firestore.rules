@@ -1,0 +1,48 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function member(store) {
+      return request.auth != null &&
+        exists(/databases/$(database)/documents/stores/$(store)/members/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/stores/$(store)/members/$(request.auth.uid)).data.active == true &&
+        get(/databases/$(database)/documents/stores/$(store)/members/$(request.auth.uid)).data.mustChangePassword == false;
+    }
+    function role(store) {
+      return get(/databases/$(database)/documents/stores/$(store)/members/$(request.auth.uid)).data.role;
+    }
+    function station(store) { return member(store) && role(store) == 'station'; }
+    function operationAllowed(store, operation) {
+      return role(store) in ['admin', 'manager'] ||
+        (role(store) == 'sales' && operation in ['sale','payment','warranty']) ||
+        (role(store) == 'warehouse' && operation in ['purchase','receive','quarantine','warrantyUpdate']) ||
+        (role(store) == 'driver' && operation == 'delivery');
+    }
+    match /stores/{store}/members/{uid} {
+      allow get: if request.auth != null && (request.auth.uid == uid || station(store));
+      allow list, create, update, delete: if false;
+    }
+    match /stores/{store}/commands/{id} {
+      allow create: if member(store) && operationAllowed(store, request.resource.data.operation) &&
+        request.resource.data.keys().hasAll(['commandId','actorUid','operation','entityId','expectedVersion','payload','createdAt']) &&
+        request.resource.data.keys().hasOnly(['commandId','actorUid','operation','entityId','expectedVersion','payload','createdAt']) &&
+        request.resource.data.commandId == id &&
+        request.resource.data.actorUid == request.auth.uid &&
+        request.resource.data.entityId is string && request.resource.data.entityId.size() > 0 &&
+        request.resource.data.entityId.size() <= 128 &&
+        request.resource.data.expectedVersion is int && request.resource.data.expectedVersion >= 0 &&
+        request.resource.data.payload is map && request.resource.data.createdAt == request.time;
+      allow read: if member(store) && (station(store) || request.auth.uid == resource.data.actorUid || role(store) in ['admin','manager']);
+      allow update, delete: if false;
+    }
+    // Business processing belongs to a trusted, separately provisioned station.
+    // These Rules do not validate costing/accounting inside a station payload.
+    match /stores/{store}/{collection}/{id} {
+      allow read: if member(store) && role(store) != 'driver' &&
+        collection in ['catalog','documents','balances','receipts','events','audits'];
+      allow create: if station(store) && collection in ['catalog','documents','balances','receipts','events','audits'];
+      allow update: if station(store) && collection in ['catalog','documents','balances'];
+      allow delete: if false;
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

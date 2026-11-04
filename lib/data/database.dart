@@ -32,6 +32,11 @@ class Outbox extends Table {
   TextColumn get payload => text()();
   TextColumn get status => text().withDefault(const Constant('pending'))();
   IntColumn get attempts => integer().withDefault(const Constant(0))();
+  TextColumn get actorUid => text().nullable()();
+  TextColumn get operation => text().nullable()();
+  IntColumn get expectedVersion => integer().withDefault(const Constant(0))();
+  DateTimeColumn get nextAttemptAt => dateTime().nullable()();
+  TextColumn get lastError => text().nullable()();
   DateTimeColumn get createdAt => dateTime()();
   @override
   Set<Column> get primaryKey => {id};
@@ -44,7 +49,74 @@ class AuditEvents extends Table {
   DateTimeColumn get createdAt => dateTime()();
 }
 
-@DriftDatabase(tables: [Products, Drafts, Outbox, AuditEvents])
+// Canonical local projections. Only the authority engine may change these.
+class BusinessRecords extends Table {
+  TextColumn get id => text()();
+  TextColumn get kind => text()();
+  TextColumn get payload => text()();
+  IntColumn get version => integer()();
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+class CommandReceipts extends Table {
+  TextColumn get id => text()();
+  TextColumn get fingerprint => text()();
+  TextColumn get result => text()();
+  DateTimeColumn get confirmedAt => dateTime()();
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+class BusinessEvents extends Table {
+  IntColumn get sequence => integer().autoIncrement()();
+  TextColumn get commandId => text().unique()();
+  TextColumn get kind => text()();
+  TextColumn get actorId => text()();
+  TextColumn get payload => text()();
+  DateTimeColumn get occurredAt => dateTime()();
+}
+
+class SyncCheckpoints extends Table {
+  TextColumn get storeId => text()();
+  IntColumn get sequence => integer().withDefault(const Constant(0))();
+  @override
+  Set<Column> get primaryKey => {storeId};
+}
+
+class InboxEvents extends Table {
+  TextColumn get id => text()();
+  TextColumn get storeId => text()();
+  IntColumn get sequence => integer()();
+  TextColumn get payload => text()();
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+class PrintJobs extends Table {
+  TextColumn get id => text()();
+  TextColumn get documentId => text()();
+  BlobColumn get pdfBytes => blob()();
+  TextColumn get status => text().withDefault(const Constant('prepared'))();
+  DateTimeColumn get createdAt => dateTime()();
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DriftDatabase(
+  tables: [
+    Products,
+    Drafts,
+    Outbox,
+    AuditEvents,
+    BusinessRecords,
+    CommandReceipts,
+    BusinessEvents,
+    SyncCheckpoints,
+    InboxEvents,
+    PrintJobs,
+  ],
+)
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor])
     : super(
@@ -58,9 +130,26 @@ class AppDatabase extends _$AppDatabase {
             ),
       );
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 4;
   @override
   MigrationStrategy get migration => MigrationStrategy(
+    onUpgrade: (m, from, to) async {
+      if (from < 2) {
+        await m.createTable(businessRecords);
+        await m.createTable(commandReceipts);
+        await m.createTable(businessEvents);
+      }
+      if (from < 3) {
+        await m.addColumn(outbox, outbox.actorUid);
+        await m.addColumn(outbox, outbox.operation);
+        await m.addColumn(outbox, outbox.expectedVersion);
+        await m.addColumn(outbox, outbox.nextAttemptAt);
+        await m.addColumn(outbox, outbox.lastError);
+        await m.createTable(syncCheckpoints);
+        await m.createTable(inboxEvents);
+      }
+      if (from < 4) await m.createTable(printJobs);
+    },
     beforeOpen: (_) async {
       await customStatement('PRAGMA foreign_keys = ON');
     },

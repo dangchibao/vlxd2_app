@@ -2,6 +2,9 @@
 # Local build packages and Kotlin compiler cache
 /dist/
 /android/.kotlin/
+/.tools/
+/security/node_modules/
+/.firebase/
 *.class
 *.log
 *.pyc
