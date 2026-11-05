@@ -59,7 +59,7 @@ trạm hoặc cờ đổi mật khẩu qua màn hình này.
 
 ## Chạy ứng dụng
 
-Các bản 0.8.0 nằm trong thư mục `dist`.
+Các bản 0.9.0 nằm trong thư mục `dist`.
 
 Khi cập nhật, hãy mở bản 0.8.0 trên máy trạm trước khi gửi phiếu có nhiều
 lô. Với hàng theo lô, nhập mã lô nếu chỉ dùng một lô. Nếu có nhiều lô trên
@@ -68,11 +68,11 @@ thể ghi mã màu riêng theo dạng `A:2:BE; B:3:XAM`. Khi trả hàng, nhập
 thực trả; ứng dụng hiển thị số lượng còn được trả của từng lô. Khi bán các
 lô khác mã màu, chỉ xác nhận trộn màu sau khi khách đồng ý.
 
-- Windows: giải nén `VLXD-Bay-Hai-Windows-0.8.0.zip` rồi mở
+- Windows: giải nén `VLXD-Bay-Hai-Windows-0.9.0.zip` rồi mở
   `app/vlxd_bay_hai.exe`. Giữ các DLL và thư mục `data` cạnh file chạy.
-- Android: `VLXD-Bay-Hai-Android-0.8.0.apk` có chữ ký debug dành cho cài thử
+- Android: `VLXD-Bay-Hai-Android-0.9.0.apk` có chữ ký debug dành cho cài thử
   ngoài Play Store. Hỗ trợ Android API 24 trở lên.
-- iPhone: giải nén `VLXD-Bay-Hai-PWA-0.8.0.zip` lên máy chủ tĩnh HTTPS, rồi
+- iPhone: giải nén `VLXD-Bay-Hai-PWA-0.9.0.zip` lên máy chủ tĩnh HTTPS, rồi
   thêm vào màn hình chính từ Safari theo mục PWA bên dưới.
 
 Để chạy từ mã nguồn:
@@ -166,6 +166,16 @@ hay xử lý hàng lỗi từ điện thoại.
 phân bổ thanh toán từ thiết bị khác.
 
 ## In K80
+
+Trên Windows, mở **Yêu cầu / Nhật ký in → Nhật ký trên máy này → In phiếu thử K80**.
+Mẫu 80 × 100 mm có viền để kiểm tra cắt mép, chữ tiếng Việt và vạch ngang
+50 mm để kiểm tra tỉ lệ. Mẫu này có thể gửi in khi máy Windows ngoại tuyến.
+
+Khi mở lại chứng từ đã có nhật ký trên máy, kiểm tra dấu **BẢN IN LẠI** và
+xác nhận trước khi in thêm. Nếu một lệnh từ điện thoại đã có kết quả trong
+nhật ký Windows nhưng vẫn ở trạng thái trạm đã nhận, mở lại lệnh và chọn
+**Đồng bộ kết quả đã lưu**. Thao tác này chỉ đồng bộ trạng thái. Với lệnh bị
+gián đoạn giữa chừng, dùng **Đối chiếu thủ công** sau khi kiểm tra bản giấy.
 
 Windows xem trước PDF với font tiếng Việt nhúng rồi chọn máy in trong hộp
 thoại hệ thống. Máy phải có driver K80 phù hợp; tên máy in không chứng minh

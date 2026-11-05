@@ -15,9 +15,53 @@ const barcodeLabelFormat = PdfPageFormat(
   marginAll: 4 * PdfPageFormat.mm,
 );
 
+const k80TestFormat = PdfPageFormat(
+  80 * PdfPageFormat.mm,
+  100 * PdfPageFormat.mm,
+  marginAll: 4 * PdfPageFormat.mm,
+);
+
 bool validLabelCode(String code) => RegExp(r'^[!-~]{1,32}$').hasMatch(code);
 
 class ReceiptRenderer {
+  Future<Uint8List> renderPrinterTest() async {
+    final font = pw.Font.ttf(
+      await rootBundle.load('assets/fonts/NotoSans-Regular.ttf'),
+    );
+    final document = pw.Document(theme: pw.ThemeData.withFont(base: font));
+    document.addPage(
+      pw.Page(
+        pageFormat: k80TestFormat,
+        build: (_) => pw.Container(
+          width: double.infinity,
+          decoration: pw.BoxDecoration(border: pw.Border.all()),
+          padding: const pw.EdgeInsets.all(6),
+          child: pw.Column(
+            mainAxisSize: pw.MainAxisSize.min,
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            children: [
+              pw.Text('VLXD BẢY HẢI', style: const pw.TextStyle(fontSize: 15)),
+              pw.Text('PHIẾU THỬ MÁY IN K80'),
+              pw.SizedBox(height: 10),
+              pw.Text('Tiếng Việt: Ống nối, gạch ốp, số lượng'),
+              pw.Text('Lô THỬ-01 • Serial K80-TEST-01'),
+              pw.SizedBox(height: 12),
+              pw.Container(
+                width: 50 * PdfPageFormat.mm,
+                height: 1,
+                color: PdfColors.black,
+              ),
+              pw.Text('Đoạn ngang chuẩn 50 mm'),
+              pw.SizedBox(height: 8),
+              pw.Text('Mẫu thử thiết bị'),
+            ],
+          ),
+        ),
+      ),
+    );
+    return document.save();
+  }
+
   Future<Uint8List> renderLabel(Map<String, dynamic> data) async {
     final code = textField(data, 'labelCode');
     if (!validLabelCode(code)) {
