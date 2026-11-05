@@ -1,3 +1,5 @@
+import 'package:drift/drift.dart'
+    show StringExpressionOperators, BooleanExpressionOperators;
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
@@ -7,6 +9,7 @@ import '../domain/operations.dart';
 import '../domain/product_policy.dart';
 import 'business_pages.dart';
 import 'catalog_art.dart';
+import 'barcode_scan.dart';
 import 'material_calculator.dart';
 import 'reports_search.dart';
 
@@ -19,6 +22,74 @@ class CatalogPage extends StatelessWidget {
       builder: (_) => CatalogEditor(runtime: runtime, row: row),
     ),
   );
+  Future<void> priceHistory(
+    BuildContext context,
+    Map<String, dynamic> product,
+  ) async {
+    final db = runtime.db;
+    final rows =
+        await (db.select(db.businessRecords)..where(
+              (row) =>
+                  row.kind.equals('priceHistory') &
+                  row.id.like("priceHistory:${product['id']}:%"),
+            ))
+            .get();
+    if (!context.mounted) return;
+    final history =
+        rows
+            .map(recordData)
+            .where((entry) => entry['productId'] == product['id'])
+            .toList()
+          ..sort(
+            (a, b) =>
+                (b['changedAt'] as String).compareTo(a['changedAt'] as String),
+          );
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("Lịch sử giá • ${product['sku']}"),
+        content: SizedBox(
+          width: 540,
+          child: history.isEmpty
+              ? const Text('Chưa có lịch sử giá đã đồng bộ.')
+              : SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (final entry in history)
+                        ListTile(
+                          title: Text(vnd(entry['price'] as int)),
+                          subtitle: Text(
+                            DateTime.parse(entry['changedAt'] as String)
+                                .toLocal()
+                                .toString()
+                                .split('.')
+                                .first,
+                          ),
+                          onTap: () => showDialog<void>(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: const Text('Chi tiết bảng giá'),
+                              content: SingleChildScrollView(
+                                child: RecordDetails(data: entry),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Đóng'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => RecordList(
     runtime: runtime,
@@ -66,6 +137,11 @@ class CatalogPage extends StatelessWidget {
               ),
             ),
             actions: [
+              TextButton.icon(
+                onPressed: () => priceHistory(context, data),
+                icon: const Icon(Icons.history),
+                label: const Text('Lịch sử giá'),
+              ),
               TextButton(
                 onPressed: () => Navigator.pop(context),
                 child: const Text('Đóng'),
@@ -103,6 +179,8 @@ class _CatalogEditorState extends State<CatalogEditor> {
       'imageUrl',
       'variantOf',
       'minimumStock',
+      'warrantyDays',
+      'components',
       'units',
       'priceLists',
       'quantityTiers',
@@ -129,6 +207,8 @@ class _CatalogEditorState extends State<CatalogEditor> {
     fields['price']!.text = '${old['price'] ?? 0}';
     fields['minimumStock']!.text = qty(old['minimumStock'] as int? ?? 0);
     fields['units']!.text = mapText(old['units'], scaled: true);
+    fields['components']!.text = mapText(old['components'], scaled: true);
+    fields['warrantyDays']!.text = '${old['warrantyDays'] ?? 0}';
     fields['priceLists']!.text = mapText(old['priceLists']);
     fields['attributes']!.text = mapText(old['attributes']);
     fields['quantityTiers']!.text = (old['quantityTiers'] as List? ?? [])
@@ -192,6 +272,8 @@ class _CatalogEditorState extends State<CatalogEditor> {
         'price': int.parse(fields['price']!.text),
         'minimumStock': parseFixed(fields['minimumStock']!.text, 3),
         'tracking': tracking,
+        'warrantyDays': parseFixed(fields['warrantyDays']!.text, 0),
+        'components': parsePairs('components', (value) => parseFixed(value, 3)),
         'active': active,
         'tax': taxTreatment.isEmpty
             ? null
@@ -264,6 +346,7 @@ class _CatalogEditorState extends State<CatalogEditor> {
     int lines = 1,
     String? help,
     bool enabled = true,
+    Widget? suffixIcon,
   }) => Padding(
     padding: const EdgeInsets.only(bottom: 16),
     child: TextField(
@@ -275,6 +358,7 @@ class _CatalogEditorState extends State<CatalogEditor> {
         labelText: label,
         helperText: help,
         helperMaxLines: 3,
+        suffixIcon: suffixIcon,
       ),
     ),
   );
@@ -291,7 +375,14 @@ class _CatalogEditorState extends State<CatalogEditor> {
         field('unit', 'Đơn vị gốc', enabled: widget.row == null),
         field('price', 'Giá bán gốc (VND)'),
         field('group', 'Nhóm hàng (nhập tên mới để tạo)'),
-        field('barcode', 'Barcode'),
+        field(
+          'barcode',
+          'Mã vạch',
+          suffixIcon: BarcodeScanButton(
+            enabled: !busy,
+            onScan: (code) => fields['barcode']!.text = code,
+          ),
+        ),
         field('brand', 'Thương hiệu'),
         field('model', 'Model'),
         field('variantOf', 'SKU sản phẩm gốc (nếu là biến thể)'),
@@ -337,6 +428,18 @@ class _CatalogEditorState extends State<CatalogEditor> {
           help: 'Dán đường dẫn HTTPS hoặc chọn ảnh minh họa có sẵn.',
         ),
         field('minimumStock', 'Tồn tối thiểu theo đơn vị gốc'),
+        field(
+          'warrantyDays',
+          'Thời hạn bảo hành (ngày)',
+          help:
+              'Nhập 0 nếu chưa quy định. Đơn bán giữ thời hạn tại lúc ghi sổ.',
+        ),
+        field(
+          'components',
+          'Thành phần cho một bộ',
+          lines: 3,
+          help: 'Mỗi dòng nhập Mã hàng=Số lượng gốc. Ví dụ ONG25=2. Để trống với hàng thường.',
+        ),
         DropdownButtonFormField<String>(
           initialValue: tracking,
           decoration: const InputDecoration(labelText: 'Theo dõi tồn'),

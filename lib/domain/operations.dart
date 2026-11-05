@@ -32,6 +32,8 @@ enum Operation {
   sale,
   payment,
   delivery,
+  assemble,
+  qualityDisposition,
   quarantine,
   release,
   expense,

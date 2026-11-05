@@ -264,16 +264,40 @@ class StockTracking {
         movement['colorCode'] = lot['colorCode'] ?? line['colorCode'] ?? '';
       }
       await receive(warehouse, movement, 'inventory-adjustment', countId);
-    } else if (tracking == 'lot') {
+    } else {
+      await remove(
+        warehouse,
+        line,
+        -delta,
+        quality,
+        status: 'adjustedOut',
+        referenceKey: 'inventoryCountId',
+        referenceId: countId,
+      );
+    }
+  }
+
+  Future<void> remove(
+    String warehouse,
+    Map<String, dynamic> line,
+    int quantity,
+    String quality, {
+    required String status,
+    required String referenceKey,
+    required String referenceId,
+  }) async {
+    final product = textField(line, 'productId');
+    final tracking = await mode(product);
+    if (tracking == 'lot') {
       await _position(
         warehouse,
         product,
         textField(line, 'lotId'),
         quality,
-        delta,
+        -quantity,
       );
-    } else {
-      for (final serial in serials(movement, delta.abs())) {
+    } else if (tracking == 'serial') {
+      for (final serial in serials(line, quantity)) {
         final old = await read('serial', serial);
         if (old['productId'] != product ||
             old['warehouse'] != warehouse ||
@@ -281,13 +305,13 @@ class StockTracking {
             old['status'] != 'available') {
           throw const BusinessException(
             'serial',
-            'Serial kiểm kê thiếu không thuộc tồn này.',
+            'Serial không thuộc tồn cần xuất.',
           );
         }
         await write('serial', serial, {
           ...old,
-          'status': 'adjustedOut',
-          'inventoryCountId': countId,
+          'status': status,
+          referenceKey: referenceId,
         });
       }
     }

@@ -23,6 +23,8 @@ class _DocumentsPageState extends State<DocumentsPage> {
     'purchaseReceipt': 'Nhập kho',
     'transfer': 'Chuyển kho',
     'returnReceipt': 'Nhận hàng trả',
+    'assemble': 'Lắp bộ sản phẩm',
+    'qualityDisposition': 'Xử lý hàng lỗi',
     'inventoryCount': 'Kiểm kê',
     'warranty': 'Bảo hành',
     'expense': 'Chi phí',

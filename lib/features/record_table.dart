@@ -20,6 +20,7 @@ String businessStatus(Object? value) => switch (value) {
   'damaged' => 'Hỏng',
   'closed' => 'Đã chốt',
   'completed' => 'Hoàn tất',
+  'replaced' => 'Đã đổi hàng',
   'checking' => 'Đang kiểm tra',
   'repairing' => 'Đang sửa',
   'supplier' => 'Gửi NCC',

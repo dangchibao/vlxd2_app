@@ -30,16 +30,20 @@ node tools/manage-store.cjs create giaohang driver
 node tools/manage-store.cjs create tram station
 ```
 
-Tài khoản `admin` của cửa hàng đã được tạo. Đăng nhập bằng mật khẩu khởi tạo
-trong đặc tả riêng, sau đó chọn mật khẩu mới trong app. Chủ project chạy lệnh
-sau để cấp quyền ghi sổ khi Auth xác nhận việc đổi mật khẩu.
+Tài khoản `admin` đầu tiên của cửa hàng đã đổi mật khẩu và được kích hoạt.
+Tại màn hình đổi mật khẩu lần đầu, bấm **Kiểm tra trạng thái kích hoạt**
+hoặc đăng nhập lại bằng mật khẩu mới.
+
+Khi tạo tài khoản nhân viên mới, chủ project chạy lệnh dưới đây với tên
+đăng nhập của nhân viên sau khi Firebase Authentication xác nhận đổi mật khẩu.
 
 ```powershell
-node tools/manage-store.cjs activate admin
+node tools/manage-store.cjs activate banhang
 ```
 
-Lệnh chỉ gỡ cờ bắt buộc đổi mật khẩu khi Auth trả bằng chứng
-`passwordUpdatedAt` mới hơn mốc khởi tạo, không tin lời xác nhận từ client.
+Lệnh kiểm tra tài khoản đang hoạt động và thời điểm đổi mật khẩu trong Auth.
+Lần kích hoạt đầu ghi nhật ký cùng lúc với cấp quyền. Chạy lại trả về trạng thái
+đã kích hoạt.
 Tài khoản trạm dùng mật khẩu riêng ít nhất 20 ký tự do chủ cửa hàng đặt, không
 được dùng mật khẩu khởi tạo của nhân viên. Trạm không đăng nhập như nhân viên.
 Không có chức năng tự đặt lại mật khẩu đã có bằng lệnh create.
@@ -55,13 +59,13 @@ trạm hoặc cờ đổi mật khẩu qua màn hình này.
 
 ## Chạy ứng dụng
 
-Các bản 0.4.2 nằm trong thư mục `dist`.
+Các bản 0.5.0 nằm trong thư mục `dist`.
 
-- Windows: giải nén `VLXD-Bay-Hai-Windows-0.4.2.zip` rồi mở
+- Windows: giải nén `VLXD-Bay-Hai-Windows-0.5.0.zip` rồi mở
   `app/vlxd_bay_hai.exe`. Giữ các DLL và thư mục `data` cạnh file chạy.
-- Android: `VLXD-Bay-Hai-Android-0.4.2.apk` có chữ ký debug dành cho cài thử
+- Android: `VLXD-Bay-Hai-Android-0.5.0.apk` có chữ ký debug dành cho cài thử
   ngoài Play Store. Hỗ trợ Android API 24 trở lên.
-- iPhone: giải nén `VLXD-Bay-Hai-PWA-0.4.2.zip` lên máy chủ tĩnh HTTPS, rồi
+- iPhone: giải nén `VLXD-Bay-Hai-PWA-0.5.0.zip` lên máy chủ tĩnh HTTPS, rồi
   thêm vào màn hình chính từ Safari theo mục PWA bên dưới.
 
 Để chạy từ mã nguồn:
@@ -112,6 +116,26 @@ Tiền là số nguyên VND; lượng chính xác tới 0,001 đơn vị gốc. 
 nhập theo hệ số của đơn vị gốc. Phiếu giữ cả lượng gốc và đơn vị bán. Khi giá
 đã đổi sau lúc lập nháp, lệnh bị xung đột để người dùng kiểm tra, không tự đổi
 giá âm thầm. Báo giá chuyển đơn giữ giá snapshot đã duyệt.
+
+## Lắp bộ, xử lý hàng lỗi và bảo hành
+
+- Trong **Hàng hóa**, nhập định mức từng thành phần theo dạng `Mã=Số lượng`.
+  Đồng bộ xong, vào **Kho → Lắp bộ** để tạo phiếu. Phiếu chuyển giá vốn từ
+  thành phần sang bộ, kiểm tra tồn khả dụng và phiên bản định mức.
+- Trong **Kho**, mở tồn cách ly hoặc hàng hỏng để xác nhận hỏng, chuyển về
+  cách ly sau sửa, xuất trả nhà cung cấp hoặc xuất hủy. Có trường lý do, ảnh
+  HTTPS và số phiếu nhà cung cấp. Xử lý xuất trả ghi biến động tồn. Đối chiếu
+  tiền và công nợ theo chứng từ tài chính tương ứng.
+- Đặt thời hạn bảo hành trong **Hàng hóa** để đơn bán mới lưu thời hạn đó.
+  Khi đổi, ghi sổ phiếu trả của đơn gốc và đơn bán hàng thay thế. Quản lý mở
+  phiếu bảo hành và chọn **Đối chiếu đổi bảo hành** để liên kết chứng từ.
+- Nút camera trên Android và PWA có trong ô mã vạch của hàng hóa và ô tìm
+  hàng khi lập đơn. PWA cần HTTPS và quyền camera. Trình duyệt dùng bộ giải
+  mã dự phòng có thể cần mạng lúc mở camera lần đầu. Windows nhận mã từ
+  máy quét USB dạng bàn phím hoặc ô nhập tay.
+
+Đóng bản Windows cũ trên máy trạm và mở bản 0.5.0 trước khi gửi lệnh lắp bộ
+hay xử lý hàng lỗi từ điện thoại.
 
 ## In K80
 

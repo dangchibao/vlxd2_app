@@ -31,6 +31,8 @@ class ReceiptRenderer {
       'purchaseReceipt' => 'PHIẾU NHẬP KHO',
       'transfer' => 'PHIẾU CHUYỂN KHO',
       'returnReceipt' => 'PHIẾU NHẬN HÀNG TRẢ',
+      'assemble' => 'PHIẾU LẮP BỘ',
+      'qualityDisposition' => 'PHIẾU XỬ LÝ HÀNG LỖI',
       'inventoryCount' => 'PHIẾU KIỂM KÊ',
       'warranty' => 'PHIẾU TIẾP NHẬN BẢO HÀNH',
       _ => throw const FormatException('Loại phiếu không hỗ trợ.'),
@@ -96,6 +98,10 @@ class ReceiptRenderer {
       if (data['vehicleId'] != null) pw.Text('Xe: ${data['vehicleId']}'),
       for (final field in const {
         'saleId': 'Đơn bán',
+        'returnId': 'Phiếu hàng trả',
+        'replacementSaleId': 'Đơn thay thế',
+        'warrantyUntil': 'Hạn bảo hành',
+        'reference': 'Chứng từ đối chiếu',
         'purchaseId': 'Đơn mua',
         'shiftId': 'Ca',
         'reason': 'Lý do',
@@ -212,6 +218,25 @@ class ReceiptRenderer {
       rows.addAll([
         pw.Text('Số tiền: ${money(integerField(data, 'amount'))}'),
         pw.Text('Nội dung: ${data['reason']}'),
+      ]);
+    }
+    if (kind == 'assemble' || kind == 'qualityDisposition') {
+      if (kind == 'qualityDisposition') {
+        final action = switch (data['action']) {
+          'damage' => 'Xác nhận hỏng',
+          'repair' => 'Sửa xong, đưa về cách ly',
+          'discard' => 'Xuất hủy',
+          'supplier' => 'Xuất trả nhà cung cấp',
+          _ => '',
+        };
+        rows.add(pw.Text(action));
+      }
+      rows.addAll([
+        pw.Text("Hàng hóa: ${data['name'] ?? data['productId']}"),
+        pw.Text(
+          "Số lượng: ${quantity(integerField(data, 'quantity', min: 1))} ${data['unit'] ?? ''}",
+        ),
+        pw.Text("Giá trị tồn: ${money(integerField(data, 'value'))}"),
       ]);
     }
     if (kind == 'inventoryCount') {

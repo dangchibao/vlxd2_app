@@ -1,3 +1,13 @@
+# Cập nhật 0.5.0
+
+- Tài khoản admin đầu tiên đã kích hoạt sau khi đối chiếu việc đổi mật khẩu trong Firebase Authentication. Firestore có đúng một audit kích hoạt cho tài khoản này.
+- Kho có phiếu lắp bộ và xử lý hàng lỗi, cùng lịch sử chứng từ. Lắp bộ dùng các thành phần không theo lô hoặc serial và giữ nguyên tổng giá trị tồn khi chuyển giá vốn. Hàng lỗi hỗ trợ xác nhận hỏng, đưa về cách ly sau sửa, xuất trả NCC và xuất hủy.
+- Đơn bán mới lưu thời hạn bảo hành nếu có cấu hình. Đổi bảo hành liên kết một phiếu hàng trả và một đơn thay thế đã ghi sổ, có kiểm tra quyền và chống dùng lại chứng từ.
+- Hàng hóa có lịch sử giá. Android và PWA có nút quét camera trong ô mã vạch và khi tìm hàng để lập đơn. Windows dùng máy quét USB dạng bàn phím hoặc ô nhập mã.
+- Analyze sạch. 85 ca unit/widget đạt. Kiểm thử camera trên điện thoại và in KV804 cần thiết bị thật.
+
+---
+
 # Cập nhật 0.4.2 — Ảnh và danh mục mẫu
 
 - Màn đăng nhập dùng ảnh minh họa showroom và logo mái nhà. Logo đồng nhất với biểu tượng mở ứng dụng Windows, Android và PWA.

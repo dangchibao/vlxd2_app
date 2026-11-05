@@ -49,7 +49,8 @@ async function main() {
   catch { root = path.join(process.env.APPDATA || '', 'npm/node_modules/firebase-tools'); }
   const auth = require(path.join(root,'lib/auth'));
   const options = {project:PROJECT,nonInteractive:true};
-  auth.setActiveAccount(options,auth.getGlobalDefaultAccount());
+  const account = auth.getGlobalDefaultAccount();
+  auth.setActiveAccount(options,account);
   await require(path.join(root,'lib/requireAuth')).requireAuth(options);
   const token = await require(path.join(root,'lib/apiv2')).getAccessToken();
   // Native fetch deliberately avoids Firebase CLI HTTP body logging for Auth.
@@ -86,7 +87,18 @@ async function main() {
     if (previous) throw Error('Membership đã có; không ghi đè.');
     next = {displayName:username,username,role,active:true,mustChangePassword:role !== 'station',bootstrapPasswordUpdatedAt:String(user.passwordUpdatedAt)};
   } else if (command === 'activate') {
-    if (!previous || user.disabled || !Number.isFinite(Number(old.bootstrapPasswordUpdatedAt)) || !(Number(user.passwordUpdatedAt) > Number(old.bootstrapPasswordUpdatedAt))) throw Error('Chưa có bằng chứng đổi mật khẩu sau khởi tạo. Không kích hoạt.');
+    if (!previous || user.disabled || old.active !== true || old.username !== username || !roles.has(old.role) || old.role === 'station') {
+      throw Error('Cần tài khoản nhân viên đang hoạt động và membership hợp lệ.');
+    }
+    if (old.mustChangePassword === false && old.activatedAt) {
+      console.log(JSON.stringify({project:PROJECT,username,action:command,success:true,alreadyActivated:true}));
+      return;
+    }
+    const baseline = Number(old.bootstrapPasswordUpdatedAt);
+    if (old.mustChangePassword !== true || !Number.isFinite(baseline) || baseline <= 0 ||
+        !Number.isFinite(user.passwordUpdatedAt) || user.passwordUpdatedAt <= baseline) {
+      throw Error('Chưa có bằng chứng đổi mật khẩu sau khởi tạo. Không kích hoạt.');
+    }
     next = {...old,mustChangePassword:false,activatedAt:new Date().toISOString()};
   } else if (command === 'set-role') {
     if (!previous || !roles.has(role) || role === 'station' || old.role === 'station') throw Error('Không đổi loại tài khoản trạm. Cần membership và vai trò nhân viên hợp lệ.');
@@ -95,10 +107,12 @@ async function main() {
     if (!previous) throw Error('Chưa có membership.');
     next = {...old,active:false};
   }
-  const auditPath = `${firestoreRoot}/stores/${STORE}/audits/owner-${randomUUID()}`;
+  if (!account?.user?.email) throw Error('Cần xác minh người thực hiện từ phiên Google.');
+  const auditId = command === 'activate' ? `activate-${user.localId}` : `owner-${randomUUID()}`;
+  const auditPath = `${firestoreRoot}/stores/${STORE}/audits/${auditId}`;
   await api('firestore.googleapis.com', `${firestoreRoot}:commit`,{method:'POST',body:{writes:[
     {update:{name:memberPath.replace(/^v1\//,''),fields:fields(next)},currentDocument:previous ? {updateTime:previous.updateTime} : {exists:false}},
-    {update:{name:auditPath.replace(/^v1\//,''),fields:fields({action:command,uid:user.localId,occurredAt:new Date().toISOString(),source:'owner-cli'})},currentDocument:{exists:false}},
+    {update:{name:auditPath.replace(/^v1\//,''),fields:fields({action:command,uid:user.localId,actor:account.user.email,occurredAt:new Date().toISOString(),source:'owner-cli'})},currentDocument:{exists:false}},
   ]}});
   console.log(JSON.stringify({project:PROJECT,username,action:command,success:true}));
 }

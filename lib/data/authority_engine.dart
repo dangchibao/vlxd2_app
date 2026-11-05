@@ -380,6 +380,8 @@ class AuthorityEngine {
           'transfer',
           'returnReceipt',
           'inventoryCount',
+          'assemble',
+          'qualityDisposition',
           'warranty',
         }.contains(kind)) {
           throw const BusinessException(
@@ -1021,6 +1023,27 @@ class AuthorityEngine {
             'Không đổi SKU của hàng đã xác nhận.',
           );
         }
+        final components = <String, int>{};
+        for (final entry in (catalogData['components'] as Map? ?? {}).entries) {
+          final componentSku = (entry.key as String).toUpperCase();
+          final componentId = (await read('sku', componentSku))['productId'];
+          final component = componentId is String
+              ? await read('catalog', componentId)
+              : <String, dynamic>{};
+          if (componentSku == sku ||
+              components.containsKey(componentSku) ||
+              component.isEmpty ||
+              component['active'] == false ||
+              (component['tracking'] ?? 'none') != 'none' ||
+              (component['components'] as Map?)?.isNotEmpty == true ||
+              trackingMode != 'none') {
+            throw const BusinessException(
+              'components',
+              'Chọn mã thành phần đang kinh doanh, không theo lô/serial và không phải bộ sản phẩm.',
+            );
+          }
+          components[componentSku] = entry.value as int;
+        }
         await store.writeProduct(
           Product(id: id, sku: sku, name: name, unit: unit, price: price),
         );
@@ -1045,6 +1068,7 @@ class AuthorityEngine {
           'unit': unit,
           'price': price,
           'tracking': trackingMode,
+          'components': components,
         };
       case Operation.party:
         final name = textField(p, 'name'), type = textField(p, 'type');
@@ -1441,6 +1465,9 @@ class AuthorityEngine {
             'name': quoted?['name'] ?? product.name,
             'unit': quoted?['unit'] ?? product.unit,
             'unitPrice': price,
+            'warrantyDays':
+                (await read('catalog', product.id))['warrantyDays'] as int? ??
+                0,
             'total': lineTotal,
             'cost': lineCost,
             'delivered': 0,
@@ -1588,6 +1615,167 @@ class AuthorityEngine {
         });
         await _deliveryProjection(id, result, status);
         return result;
+      case Operation.assemble:
+        _fresh(old);
+        final warehouse = textField(p, 'warehouse');
+        final productId = textField(p, 'productId');
+        final kits = integerField(p, 'kits', min: 1, max: 1000000);
+        final kit = await read('catalog', productId);
+        final components = kit['components'] as Map? ?? {};
+        if (components.isEmpty ||
+            kit['active'] == false ||
+            (kit['tracking'] ?? 'none') != 'none') {
+          throw const BusinessException(
+            'components',
+            'Bộ sản phẩm chưa có định mức hợp lệ.',
+          );
+        }
+        if (kit['version'] != integerField(p, 'catalogVersion', min: 1)) {
+          throw const BusinessException(
+            'conflict',
+            'Định mức đã đổi. Mở lại phiếu lắp bộ.',
+          );
+        }
+        var total = 0;
+        final lines = <Map<String, dynamic>>[];
+        for (final entry in components.entries) {
+          final sku = entry.key as String;
+          final componentId = (await read('sku', sku))['productId'];
+          final item = componentId is String
+              ? await read('catalog', componentId)
+              : <String, dynamic>{};
+          if (componentId is! String ||
+              componentId == productId ||
+              item.isEmpty ||
+              item['active'] == false ||
+              (item['tracking'] ?? 'none') != 'none' ||
+              (item['components'] as Map?)?.isNotEmpty == true) {
+            throw BusinessException(
+              'components',
+              'Thành phần $sku không còn hợp lệ.',
+            );
+          }
+          final quantity = integerField(
+            {'quantity': (entry.value as int) * kits},
+            'quantity',
+            min: 1,
+            max: 1000000000,
+          );
+          final cost = await _issue(warehouse, componentId, quantity);
+          total += cost;
+          lines.add({
+            'productId': componentId,
+            'sku': sku,
+            'name': item['name'],
+            'unit': item['unit'],
+            'quantity': quantity,
+            'cost': cost,
+          });
+        }
+        final quantity = kits * 1000;
+        await _stockChange(warehouse, productId, quantity, total);
+        return {
+          'warehouse': warehouse,
+          'productId': productId,
+          'name': kit['name'],
+          'unit': kit['unit'],
+          'quantity': quantity,
+          'value': total,
+          'catalogVersion': kit['version'],
+          'lines': lines,
+          'status': 'posted',
+        };
+      case Operation.qualityDisposition:
+        _fresh(old);
+        final warehouse = textField(p, 'warehouse');
+        final product = textField(p, 'productId');
+        final from = textField(p, 'quality');
+        final action = textField(p, 'action');
+        final quantity = integerField(p, 'quantity', min: 1, max: 1000000000);
+        final reason = textField(p, 'reason');
+        final target = switch ((from, action)) {
+          ('quarantine', 'damage') => 'damaged',
+          ('damaged', 'repair') => 'quarantine',
+          ('quarantine' || 'damaged', 'discard' || 'supplier') => '',
+          _ => throw const BusinessException(
+            'quality',
+            'Cách xử lý không phù hợp trạng thái tồn.',
+          ),
+        };
+        final current = await stock(warehouse, product, quality: from);
+        if (current['version'] != integerField(p, 'stockVersion', min: 1)) {
+          throw const BusinessException(
+            'conflict',
+            'Tồn đã thay đổi. Mở lại phiếu xử lý.',
+          );
+        }
+        if (quantity > (current['quantity'] as int)) {
+          throw const BusinessException(
+            'stock',
+            'Không đủ hàng trong trạng thái này.',
+          );
+        }
+        final value = await _issueValue(warehouse, product, quantity);
+        final photo = p['imageUrl'] as String? ?? '';
+        final url = Uri.tryParse(photo);
+        if (photo.isNotEmpty &&
+            (photo.length > 1000 ||
+                url == null ||
+                url.scheme != 'https' ||
+                url.host.isEmpty ||
+                url.userInfo.isNotEmpty)) {
+          throw const BusinessException(
+            'quality',
+            'Ảnh bằng chứng cần liên kết HTTPS hợp lệ.',
+          );
+        }
+        final reference = action == 'supplier' ? textField(p, 'reference') : '';
+        if (target.isEmpty) {
+          await tracking.remove(
+            warehouse,
+            p,
+            quantity,
+            from,
+            status: action == 'supplier' ? 'returnedToSupplier' : 'discarded',
+            referenceKey: 'dispositionId',
+            referenceId: id,
+          );
+        } else {
+          await tracking.move(
+            warehouse,
+            warehouse,
+            p,
+            fromQuality: from,
+            toQuality: target,
+          );
+        }
+        await _stockChange(
+          warehouse,
+          product,
+          -quantity,
+          -value,
+          quality: from,
+        );
+        if (target.isNotEmpty) {
+          await _stockChange(
+            warehouse,
+            product,
+            quantity,
+            value,
+            quality: target,
+          );
+        }
+        return {
+          ...p,
+          'name': current['name'],
+          'unit': current['unit'],
+          'reason': reason,
+          'imageUrl': photo,
+          'reference': reference,
+          'toQuality': target,
+          'value': value,
+          'status': 'posted',
+        };
       case Operation.quarantine:
       case Operation.release:
         _fresh(old);
@@ -1681,6 +1869,7 @@ class AuthorityEngine {
             'Đơn bán không thuộc khách hàng.',
           );
         }
+        String? warrantyUntil;
         if (p['productId'] != null) {
           final line = (sale['lines'] as List)
               .where((l) => l['productId'] == p['productId'])
@@ -1690,6 +1879,18 @@ class AuthorityEngine {
               'warranty',
               'Hàng không thuộc đơn hoặc đã trả toàn bộ.',
             );
+          }
+          final days = line['warrantyDays'] as int? ?? 0;
+          final soldAt = DateTime.tryParse(sale['createdAt'] as String? ?? '');
+          if (days > 0 && soldAt != null) {
+            final until = soldAt.add(Duration(days: days));
+            if (!DateTime.now().isBefore(until)) {
+              throw const BusinessException(
+                'warranty',
+                'Sản phẩm đã hết hạn bảo hành ghi trên đơn.',
+              );
+            }
+            warrantyUntil = until.toIso8601String();
           }
           if ((p['serial'] as String? ?? '').trim().isNotEmpty) {
             final serial = textField(p, 'serial').toUpperCase();
@@ -1704,7 +1905,13 @@ class AuthorityEngine {
             }
           }
         }
-        return {...p, 'status': 'received', 'cost': 0};
+        return {
+          ...p,
+          'customerName': sale['customerName'],
+          'warrantyUntil': ?warrantyUntil,
+          'status': 'received',
+          'cost': 0,
+        };
       case Operation.warrantyUpdate:
         if (old.isEmpty) {
           throw const BusinessException(
@@ -1715,9 +1922,9 @@ class AuthorityEngine {
         final next = textField(p, 'status');
         const transitions = {
           'received': {'checking'},
-          'checking': {'repairing', 'supplier', 'rejected'},
-          'repairing': {'completed', 'supplier'},
-          'supplier': {'completed', 'rejected'},
+          'checking': {'repairing', 'supplier', 'rejected', 'replaced'},
+          'repairing': {'completed', 'supplier', 'replaced'},
+          'supplier': {'completed', 'rejected', 'replaced'},
           'completed': <String>{},
           'rejected': <String>{},
         };
@@ -1727,7 +1934,62 @@ class AuthorityEngine {
             'Bước xử lý bảo hành không hợp lệ.',
           );
         }
-        return {...old, 'status': next, 'cost': integerField(p, 'cost')};
+        final cost = integerField(p, 'cost');
+        if (next != 'replaced') return {...old, 'status': next, 'cost': cost};
+        if (!{StaffRole.admin, StaffRole.manager}.contains(actor.role)) {
+          throw const BusinessException(
+            'permission',
+            'Chỉ quản lý được xác nhận đổi bảo hành.',
+          );
+        }
+        final product = textField(old, 'productId');
+        final returnId = textField(p, 'returnId');
+        final replacementId = textField(p, 'replacementSaleId');
+        final returned = await read('returnReceipt', returnId);
+        final replacement = await read('sale', replacementId);
+        final returnLine = (returned['lines'] as List? ?? [])
+            .where((line) => line['productId'] == product)
+            .firstOrNull;
+        final replacementLine = (replacement['lines'] as List? ?? [])
+            .where((line) => line['productId'] == product)
+            .firstOrNull;
+        final serial = (old['serial'] as String? ?? '').trim().toUpperCase();
+        if (returned['saleId'] != old['saleId'] ||
+            replacementId == old['saleId'] ||
+            replacement['customerId'] != old['customerId'] ||
+            returnLine == null ||
+            replacementLine == null ||
+            (replacementLine['quantity'] as int) -
+                    (replacementLine['returned'] as int? ?? 0) <
+                (returnLine['quantity'] as int) ||
+            (serial.isNotEmpty &&
+                !(returnLine['serials'] as List? ?? []).any(
+                  (s) => s.toString().trim().toUpperCase() == serial,
+                ))) {
+          throw const BusinessException(
+            'warranty',
+            'Phiếu trả hoặc đơn thay thế không khớp hàng và khách bảo hành.',
+          );
+        }
+        final returnKey = jsonEncode(['return', returnId, product]);
+        final replacementKey = jsonEncode(['sale', replacementId, product]);
+        if ((await read('warrantyLink', returnKey)).isNotEmpty ||
+            (await read('warrantyLink', replacementKey)).isNotEmpty) {
+          throw const BusinessException(
+            'warranty',
+            'Chứng từ đã được dùng để đổi bảo hành.',
+          );
+        }
+        for (final key in [returnKey, replacementKey]) {
+          await _write('warrantyLink', key, {'warrantyId': id});
+        }
+        return {
+          ...old,
+          'status': next,
+          'cost': cost,
+          'returnId': returnId,
+          'replacementSaleId': replacementId,
+        };
     }
   }
 

@@ -22,6 +22,25 @@ class ProductPolicy {
       );
     }
     if (data['minimumStock'] != null) integerField(data, 'minimumStock');
+    if (data['warrantyDays'] != null) {
+      integerField(data, 'warrantyDays', max: 3650);
+    }
+    final components = data['components'] ?? const <String, int>{};
+    if (components is! Map ||
+        components.length > 20 ||
+        components.entries.any(
+          (entry) =>
+              entry.key is! String ||
+              !RegExp(r'^[^\s=]{1,128}$').hasMatch(entry.key as String) ||
+              entry.value is! int ||
+              (entry.value as int) < 1 ||
+              (entry.value as int) > 1000000000,
+        )) {
+      throw const BusinessException(
+        'components',
+        'Bộ sản phẩm nhận tối đa 20 mã thành phần, mỗi mã có số lượng dương.',
+      );
+    }
     if (data['tax'] != null) {
       final tax = data['tax'];
       if (tax is! Map<String, dynamic> ||

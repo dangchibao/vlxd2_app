@@ -16,6 +16,7 @@ import 'delivery_map.dart';
 import 'invoice_preparation.dart';
 import 'record_table.dart';
 import 'catalog_art.dart';
+import 'barcode_scan.dart';
 
 String vnd(int value) => '${NumberFormat.decimalPattern('vi').format(value)} đ';
 String qty(int value) => NumberFormat('0.###', 'vi').format(value / 1000);
@@ -523,6 +524,7 @@ class _OrderComposerState extends State<OrderComposer> {
       discount = TextEditingController(text: '0');
   final surcharge = TextEditingController(text: '0'),
       dueDate = TextEditingController();
+  final searchInput = TextEditingController();
   List<Product> products = [];
   List<BusinessRecord> parties = [];
   final missingItems = <Map<String, dynamic>>[];
@@ -637,6 +639,7 @@ class _OrderComposerState extends State<OrderComposer> {
       discount,
       surcharge,
       dueDate,
+      searchInput,
     ]) {
       c.dispose();
     }
@@ -886,11 +889,20 @@ class _OrderComposerState extends State<OrderComposer> {
                 ),
                 const SizedBox(height: 16),
                 TextField(
-                  decoration: const InputDecoration(
-                    labelText: 'Tìm hàng theo tên hoặc mã',
-                    prefixIcon: Icon(Icons.search),
+                  controller: searchInput,
+                  decoration: InputDecoration(
+                    labelText: 'Tìm theo tên, mã hàng hoặc mã vạch',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: BarcodeScanButton(
+                      enabled: !busy,
+                      onScan: (code) {
+                        searchInput.text = code;
+                        setState(() => search = code.toLowerCase());
+                      },
+                    ),
                   ),
-                  onChanged: (v) => setState(() => search = v.toLowerCase()),
+                  onChanged: (v) =>
+                      setState(() => search = v.trim().toLowerCase()),
                 ),
                 if (search.isNotEmpty)
                   ...products
@@ -1735,6 +1747,110 @@ class StockPage extends StatelessWidget {
       'serials': parseSerials(data['serialText'] as String? ?? ''),
     },
   );
+  Future<void> assemble(BuildContext context) async {
+    final db = runtime.db;
+    final rows = await (db.select(
+      db.businessRecords,
+    )..where((r) => r.kind.equals('catalog'))).get();
+    if (!context.mounted) return;
+    final kits = {
+      for (final row in rows)
+        if ((recordData(row)['components'] as Map?)?.isNotEmpty == true &&
+            recordData(row)['active'] != false)
+          recordData(row)['id'] as String: row,
+    };
+    if (kits.isEmpty) {
+      feedback(
+        context,
+        'Khai báo định mức của bộ sản phẩm trong Hàng hóa trước.',
+      );
+      return;
+    }
+    await commandDialog(
+      context,
+      runtime,
+      title: 'Lắp bộ sản phẩm',
+      operation: Operation.assemble,
+      entityId: const Uuid().v4(),
+      fields: [
+        InputField(
+          'productId',
+          'Bộ sản phẩm',
+          choices: [
+            for (final entry in kits.entries)
+              (
+                entry.key,
+                "${recordData(entry.value)['sku']} • ${recordData(entry.value)['name']}",
+              ),
+          ],
+        ),
+        const InputField('warehouse', 'Kho', initial: 'main'),
+        const InputField('kits', 'Số bộ cần lắp', number: true, initial: '1'),
+      ],
+      transform: (data) => {
+        ...data,
+        'catalogVersion': kits[data['productId']]!.version,
+      },
+    );
+  }
+
+  Future<void> disposition(
+    BuildContext context,
+    BusinessRecord row,
+    Map<String, dynamic> data,
+  ) => commandDialog(
+    context,
+    runtime,
+    title: 'Xử lý hàng lỗi',
+    operation: Operation.qualityDisposition,
+    entityId: const Uuid().v4(),
+    fixed: {
+      'warehouse': data['warehouse'],
+      'productId': data['productId'],
+      'quality': data['quality'],
+      'stockVersion': row.version,
+    },
+    fields: [
+      InputField(
+        'action',
+        'Cách xử lý',
+        choices: [
+          if (data['quality'] == 'quarantine') ('damage', 'Xác nhận hỏng'),
+          if (data['quality'] == 'damaged')
+            ('repair', 'Sửa xong, đưa về cách ly kiểm tra'),
+          ('supplier', 'Xuất trả nhà cung cấp'),
+          ('discard', 'Xuất hủy'),
+        ],
+      ),
+      const InputField(
+        'quantity',
+        'Số lượng theo đơn vị gốc',
+        number: true,
+        scale: 3,
+      ),
+      const InputField('reason', 'Lý do và kết quả kiểm tra'),
+      const InputField(
+        'reference',
+        'Số phiếu NCC nếu xuất trả',
+        optional: true,
+      ),
+      const InputField(
+        'imageUrl',
+        'Liên kết HTTPS ảnh bằng chứng',
+        optional: true,
+      ),
+      const InputField('lotId', 'Mã lô nếu theo lô', optional: true),
+      const InputField(
+        'serialText',
+        'Serial nếu theo dõi, ngăn cách bằng dấu phẩy',
+        optional: true,
+      ),
+    ],
+    transform: (data) =>
+        {...data, 'serials': parseSerials(data['serialText'] as String? ?? '')}
+          ..remove('serialText'),
+  );
+
   Future<void> movement(BuildContext context, Operation operation) async {
     final products = await runtime.db.select(runtime.db.products).get();
     if (!context.mounted) return;
@@ -1805,6 +1921,12 @@ class StockPage extends StatelessWidget {
     kind: 'stock',
     title: 'Tồn kho đã xác nhận',
     actions: [
+      if (allowed(runtime, Operation.assemble))
+        FilledButton.icon(
+          onPressed: () => assemble(context),
+          icon: const Icon(Icons.widgets_outlined),
+          label: const Text('Lắp bộ'),
+        ),
       for (final entry in [
         (Operation.transfer, 'Chuyển kho'),
         (Operation.quarantine, 'Cách ly'),
@@ -1817,36 +1939,56 @@ class StockPage extends StatelessWidget {
           ),
     ],
     item: (context, row, data) => Card(
-      child: ListTile(
-        onTap: allowed(runtime, Operation.inventoryCount)
-            ? () => count(context, row, data)
-            : null,
-        title: FutureBuilder(
-          future:
-              (runtime.db.select(runtime.db.products)
-                    ..where((p) => p.id.equals(data['productId'] as String)))
-                  .getSingleOrNull(),
-          builder: (context, snapshot) =>
-              Text(snapshot.data?.name ?? data['productId'] as String),
-        ),
-        subtitle: Text(
-          'Kho ${data['warehouse']} • ${switch (data['quality']) {
-            'good' => 'Hàng tốt',
-            'quarantine' => 'Cách ly',
-            _ => 'Hàng hỏng',
-          }}',
-        ),
-        trailing: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text(
-              qty(data['quantity'] as int),
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          ListTile(
+            onTap: allowed(runtime, Operation.inventoryCount)
+                ? () => count(context, row, data)
+                : null,
+            title: FutureBuilder(
+              future:
+                  (runtime.db.select(
+                        runtime.db.products,
+                      )..where((p) => p.id.equals(data['productId'] as String)))
+                      .getSingleOrNull(),
+              builder: (context, snapshot) =>
+                  Text(snapshot.data?.name ?? data['productId'] as String),
             ),
-            Text(vnd(data['value'] as int)),
-          ],
-        ),
+            subtitle: Text(
+              'Kho ${data['warehouse']} • ${switch (data['quality']) {
+                'good' => 'Hàng tốt',
+                'quarantine' => 'Cách ly',
+                _ => 'Hàng hỏng',
+              }}',
+            ),
+            trailing: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  qty(data['quantity'] as int),
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(vnd(data['value'] as int)),
+              ],
+            ),
+          ),
+          if (data['quality'] != 'good' &&
+              (data['quantity'] as int) > 0 &&
+              allowed(runtime, Operation.qualityDisposition))
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: OutlinedButton.icon(
+                onPressed: () => disposition(context, row, data),
+                icon: const Icon(Icons.build_outlined),
+                label: const Text('Xử lý hàng lỗi'),
+              ),
+            ),
+        ],
       ),
     ),
   );
@@ -2062,6 +2204,70 @@ class FinancePage extends StatelessWidget {
 class WarrantiesPage extends StatelessWidget {
   final AppRuntime runtime;
   const WarrantiesPage({super.key, required this.runtime});
+
+  Future<void> replace(
+    BuildContext context,
+    BusinessRecord row,
+    Map<String, dynamic> claim,
+  ) async {
+    final db = runtime.db;
+    final records = await (db.select(
+      db.businessRecords,
+    )..where((r) => r.kind.isIn(['sale', 'returnReceipt']))).get();
+    if (!context.mounted) return;
+    final returns = <(String, String)>[];
+    final replacements = <(String, String)>[];
+    for (final record in records) {
+      final data = recordData(record);
+      final id = data['id'] as String;
+      if (!(data['lines'] as List? ?? []).any(
+        (line) => line['productId'] == claim['productId'],
+      )) {
+        continue;
+      }
+      final label =
+          "${shortId(id)} • ${data['customerName'] ?? ''} • ${data['createdAt']?.toString().split('T').first ?? ''}";
+      if (record.kind == 'returnReceipt' && data['saleId'] == claim['saleId']) {
+        returns.add((id, label));
+      }
+      if (record.kind == 'sale' &&
+          id != claim['saleId'] &&
+          data['customerId'] == claim['customerId']) {
+        replacements.add((id, label));
+      }
+    }
+    if (returns.isEmpty || replacements.isEmpty) {
+      feedback(
+        context,
+        'Cần ghi sổ phiếu trả của đơn gốc và đơn bán hàng thay thế trước.',
+      );
+      return;
+    }
+    await commandDialog(
+      context,
+      runtime,
+      title: 'Đối chiếu đổi bảo hành',
+      operation: Operation.warrantyUpdate,
+      entityId: claim['id'] as String,
+      version: row.version,
+      fixed: const {'status': 'replaced'},
+      fields: [
+        InputField('returnId', 'Phiếu hàng trả', choices: returns),
+        InputField(
+          'replacementSaleId',
+          'Đơn hàng thay thế',
+          choices: replacements,
+        ),
+        InputField(
+          'cost',
+          'Chi phí (VND)',
+          number: true,
+          initial: '${claim['cost']}',
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) => RecordList(
     runtime: runtime,
@@ -2071,38 +2277,67 @@ class WarrantiesPage extends StatelessWidget {
       child: ListTile(
         title: Text('Bảo hành ${shortId(data['id'] as String)}'),
         subtitle: Text(
-          '${data['condition']} • ${data['status']} • ${vnd(data['cost'] as int)}',
+          [
+            if (data['customerName'] != null) data['customerName'],
+            data['condition'],
+            businessStatus(data['status']),
+            vnd(data['cost'] as int),
+            if (data['warrantyUntil'] != null)
+              "Hạn ${data['warrantyUntil'].toString().split('T').first}",
+            if (data['returnId'] != null)
+              "Phiếu trả ${shortId(data['returnId'] as String)}",
+            if (data['replacementSaleId'] != null)
+              "Đơn thay ${shortId(data['replacementSaleId'] as String)}",
+          ].join(' • '),
         ),
         trailing: allowed(runtime, Operation.warrantyUpdate)
-            ? IconButton(
-                icon: const Icon(Icons.edit_outlined),
-                onPressed: () => commandDialog(
-                  context,
-                  runtime,
-                  title: 'Cập nhật bảo hành',
-                  operation: Operation.warrantyUpdate,
-                  entityId: data['id'] as String,
-                  version: row.version,
-                  fields: [
-                    const InputField(
-                      'status',
-                      'Bước xử lý',
-                      choices: [
-                        ('checking', 'Đang kiểm tra'),
-                        ('repairing', 'Đang sửa chữa'),
-                        ('supplier', 'Gửi NCC'),
-                        ('completed', 'Hoàn thành'),
-                        ('rejected', 'Từ chối'),
+            ? Wrap(
+                children: [
+                  if ({
+                        StaffRole.admin,
+                        StaffRole.manager,
+                      }.contains(runtime.actor?.role) &&
+                      {
+                        'checking',
+                        'repairing',
+                        'supplier',
+                      }.contains(data['status']))
+                    IconButton(
+                      tooltip: 'Đối chiếu đổi bảo hành',
+                      icon: const Icon(Icons.swap_horiz),
+                      onPressed: () => replace(context, row, data),
+                    ),
+                  IconButton(
+                    icon: const Icon(Icons.edit_outlined),
+                    onPressed: () => commandDialog(
+                      context,
+                      runtime,
+                      title: 'Cập nhật bảo hành',
+                      operation: Operation.warrantyUpdate,
+                      entityId: data['id'] as String,
+                      version: row.version,
+                      fields: [
+                        const InputField(
+                          'status',
+                          'Bước xử lý',
+                          choices: [
+                            ('checking', 'Đang kiểm tra'),
+                            ('repairing', 'Đang sửa chữa'),
+                            ('supplier', 'Gửi NCC'),
+                            ('completed', 'Hoàn thành'),
+                            ('rejected', 'Từ chối'),
+                          ],
+                        ),
+                        InputField(
+                          'cost',
+                          'Chi phí (VND)',
+                          number: true,
+                          initial: '${data['cost']}',
+                        ),
                       ],
                     ),
-                    InputField(
-                      'cost',
-                      'Chi phí (VND)',
-                      number: true,
-                      initial: '${data['cost']}',
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               )
             : null,
       ),
