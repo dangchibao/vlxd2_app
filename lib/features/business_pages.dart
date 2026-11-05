@@ -269,6 +269,7 @@ class _RecordListState extends State<RecordList> {
 
 class InputField {
   final String key, label, initial;
+  final String? help;
   final bool number, optional;
   final int scale;
   final List<(String, String)>? choices;
@@ -276,6 +277,7 @@ class InputField {
     this.key,
     this.label, {
     this.initial = '',
+    this.help,
     this.number = false,
     this.optional = false,
     this.choices,
@@ -350,6 +352,8 @@ Future<void> commandDialog(
                                   : TextInputType.text,
                               decoration: InputDecoration(
                                 labelText: field.label,
+                                helperText: field.help,
+                                helperMaxLines: 3,
                               ),
                               validator: (v) {
                                 if (field.optional && (v ?? '').isEmpty) {
@@ -1897,12 +1901,13 @@ class StockPage extends StatelessWidget {
       db.businessRecords,
     )..where((r) => r.kind.equals('catalog'))).get();
     if (!context.mounted) return;
-    final kits = {
-      for (final row in rows)
-        if ((recordData(row)['components'] as Map?)?.isNotEmpty == true &&
-            recordData(row)['active'] != false)
-          recordData(row)['id'] as String: row,
-    };
+    final catalog = {for (final row in rows) row: recordData(row)};
+    final kits = [
+      for (final entry in catalog.entries)
+        if ((entry.value['components'] as Map?)?.isNotEmpty == true &&
+            entry.value['active'] != false)
+          entry.key,
+    ];
     if (kits.isEmpty) {
       feedback(
         context,
@@ -1910,30 +1915,110 @@ class StockPage extends StatelessWidget {
       );
       return;
     }
+    final selected = kits.length == 1
+        ? kits.single
+        : await showDialog<BusinessRecord>(
+            context: context,
+            builder: (context) => SimpleDialog(
+              title: const Text('Chọn bộ sản phẩm'),
+              children: [
+                for (final row in kits)
+                  SimpleDialogOption(
+                    onPressed: () => Navigator.pop(context, row),
+                    child: Text(
+                      "${catalog[row]!['sku']} • ${catalog[row]!['name']}",
+                    ),
+                  ),
+              ],
+            ),
+          );
+    if (selected == null || !context.mounted) return;
+    final kit = catalog[selected]!;
+    final bySku = {
+      for (final product in catalog.values) product['sku']: product,
+    };
+    final components = (kit['components'] as Map).cast<String, int>();
+    final tracked = <String, String>{};
+    for (final sku in components.keys) {
+      final part = bySku[sku];
+      if (part == null ||
+          part['active'] == false ||
+          (part['components'] as Map?)?.isNotEmpty == true) {
+        feedback(
+          context,
+          'Thành phần $sku chưa đồng bộ hoặc không còn hợp lệ.',
+        );
+        return;
+      }
+      final mode = part['tracking'];
+      if (mode == 'lot' || mode == 'serial') tracked[sku] = mode as String;
+    }
+    final mode = kit['tracking'];
     await commandDialog(
       context,
       runtime,
-      title: 'Lắp bộ sản phẩm',
+      title: "Lắp bộ • ${kit['sku']}",
       operation: Operation.assemble,
       entityId: const Uuid().v4(),
       fields: [
-        InputField(
-          'productId',
-          'Bộ sản phẩm',
-          choices: [
-            for (final entry in kits.entries)
-              (
-                entry.key,
-                "${recordData(entry.value)['sku']} • ${recordData(entry.value)['name']}",
-              ),
-          ],
-        ),
         const InputField('warehouse', 'Kho', initial: 'main'),
         const InputField('kits', 'Số bộ cần lắp', number: true, initial: '1'),
+        for (final entry in tracked.entries)
+          InputField(
+            'part:${entry.key}',
+            "${entry.value == 'lot' ? 'Lô xuất' : 'Serial xuất'} • ${entry.key}",
+            help:
+                "${qty(components[entry.key]!)} ${bySku[entry.key]!['unit'] ?? ''} / bộ. "
+                "${entry.value == 'lot' ? lotEntryHelp : 'Ngăn cách serial bằng dấu phẩy.'}",
+          ),
+        if (mode == 'lot') ...[
+          const InputField('output', 'Lô thành phẩm', help: lotEntryHelp),
+          const InputField('outputColor', 'Mã màu thành phẩm', optional: true),
+        ],
+        if (mode == 'serial')
+          const InputField(
+            'output',
+            'Serial mới của thành phẩm',
+            help: 'Nhập một serial mới cho mỗi bộ, ngăn cách bằng dấu phẩy.',
+          ),
       ],
-      transform: (data) => {
-        ...data,
-        'catalogVersion': kits[data['productId']]!.version,
+      transform: (data) {
+        final count = data['kits'] as int;
+        if (count < 1 || count > 1000000) {
+          throw const FormatException('Nhập từ 1 đến 1.000.000 bộ.');
+        }
+        return {
+          'productId': kit['id'],
+          'warehouse': data['warehouse'],
+          'kits': count,
+          'catalogVersion': selected.version,
+          if (tracked.isNotEmpty)
+            'componentTracking': [
+              for (final entry in tracked.entries)
+                {
+                  'sku': entry.key,
+                  if (entry.value == 'lot')
+                    ...lotFields(
+                      data['part:${entry.key}'] as String,
+                      count * components[entry.key]!,
+                    )
+                  else
+                    'serials': parseSerials(
+                      data['part:${entry.key}'] as String,
+                    ),
+                },
+            ],
+          if (mode == 'lot')
+            'outputTracking': lotFields(
+              data['output'] as String,
+              count * 1000,
+              color: data['outputColor'] as String,
+            ),
+          if (mode == 'serial')
+            'outputTracking': {
+              'serials': parseSerials(data['output'] as String),
+            },
+        };
       },
     );
   }

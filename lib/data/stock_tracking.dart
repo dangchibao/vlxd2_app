@@ -127,10 +127,11 @@ class StockTracking {
 
   Future<List<Map<String, dynamic>>?> receive(
     String warehouse,
-    Map<String, dynamic> line,
-    String supplier,
-    String purchase,
-  ) async {
+    Map<String, dynamic> line, {
+    String? supplier,
+    String? purchase,
+    String? assemblyId,
+  }) async {
     final product = textField(line, 'productId'),
         quantity = integerField(line, 'quantity', min: 1),
         quality = line['quality'] as String? ?? 'good';
@@ -157,8 +158,11 @@ class StockTracking {
           'productId': product,
           'lotId': lot,
           'colorCode': color,
-          'supplierId': previous['supplierId'] ?? supplier,
-          'purchaseId': previous['purchaseId'] ?? purchase,
+          if (previous.isEmpty) ...{
+            'supplierId': ?supplier,
+            'purchaseId': ?purchase,
+            'assemblyId': ?assemblyId,
+          },
           'receivedAt':
               previous['receivedAt'] ??
               DateTime.now().toUtc().toIso8601String(),
@@ -187,8 +191,9 @@ class StockTracking {
           'warehouse': warehouse,
           'quality': quality,
           'status': 'available',
-          'supplierId': supplier,
-          'purchaseId': purchase,
+          'supplierId': ?supplier,
+          'purchaseId': ?purchase,
+          'assemblyId': ?assemblyId,
         });
       }
     }
@@ -389,7 +394,12 @@ class StockTracking {
         );
         movement['colorCode'] = lot['colorCode'] ?? line['colorCode'] ?? '';
       }
-      await receive(warehouse, movement, 'inventory-adjustment', countId);
+      await receive(
+        warehouse,
+        movement,
+        supplier: 'inventory-adjustment',
+        purchase: countId,
+      );
     } else {
       await remove(
         warehouse,
@@ -416,10 +426,20 @@ class StockTracking {
     final tracking = await mode(product);
     if (tracking == 'lot') {
       for (final allocation in lots(line, quantity)) {
+        final lot = allocation['lotId'] as String;
+        final color = allocation['colorCode'];
+        if (color != null &&
+            (await read('lot', jsonEncode([product, lot])))['colorCode'] !=
+                color) {
+          throw const BusinessException(
+            'lot',
+            'Mã màu không khớp với lô hàng.',
+          );
+        }
         await _position(
           warehouse,
           product,
-          allocation['lotId'] as String,
+          lot,
           quality,
           -(allocation['quantity'] as int),
         );

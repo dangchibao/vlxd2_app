@@ -293,6 +293,76 @@ void main() {
       expect(periodStock.incoming, BigInt.from(1000));
       expect(periodStock.outgoing, BigInt.from(1000));
       expect(periodStock.closing, BigInt.zero);
+
+      Future<Map<String, dynamic>> confirmAssemblyFixture(
+        Operation operation,
+        String entityId,
+        Map<String, dynamic> payload, {
+        int version = 0,
+      }) async {
+        final id = await runtime.enqueue(
+          operation,
+          entityId,
+          payload,
+          expectedVersion: version,
+        );
+        while (runtime.syncing) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        final result = await transport.receipt(id);
+        expect(result?.status, 'confirmed', reason: '${result?.result}');
+        return result!.result;
+      }
+
+      final replenishmentId = 'replenishment-$uid';
+      await confirmAssemblyFixture(Operation.purchase, replenishmentId, {
+        'warehouse': 'main',
+        'supplierId': 'supplier',
+        'lines': [
+          {'productId': productId, 'quantity': 1000, 'unitCost': 10000},
+        ],
+      });
+      await confirmAssemblyFixture(Operation.receive, replenishmentId, {
+        'lines': [
+          {
+            'productId': productId,
+            'quantity': 1000,
+            'lotAllocations': allocations,
+          },
+        ],
+      }, version: 1);
+      final kitId = 'kit-$uid';
+      await confirmAssemblyFixture(Operation.catalog, kitId, {
+        'sku': 'KIT-$uid',
+        'name': 'Bộ thử',
+        'unit': 'bộ',
+        'price': 30000,
+        'tracking': 'serial',
+        'components': {'A-${uid.toUpperCase()}': 1000},
+      });
+      final assemblyId = 'assembly-$uid';
+      final serial = 'KIT-${uid.toUpperCase()}';
+      final assembled = await confirmAssemblyFixture(
+        Operation.assemble,
+        assemblyId,
+        {
+          'warehouse': 'main',
+          'productId': kitId,
+          'kits': 1,
+          'catalogVersion': 1,
+          'componentTracking': [
+            {'sku': 'A-$uid', 'lotAllocations': allocations},
+          ],
+          'outputTracking': {
+            'serials': [serial],
+          },
+        },
+      );
+      expect(assembled['value'], 10000);
+      final cachedSerial = await (runtime.db.select(
+        runtime.db.businessRecords,
+      )..where((r) => r.id.equals('serial:$serial'))).getSingle();
+      expect(jsonDecode(cachedSerial.payload)['assemblyId'], assemblyId);
       final catalogId = 'catalog-$uid';
       final commandId = await runtime.enqueue(Operation.catalog, catalogId, {
         'sku': 'SYNC-$uid',

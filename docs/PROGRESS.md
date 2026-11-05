@@ -1,3 +1,12 @@
+# Cập nhật 0.8.0
+
+- Phiếu lắp bộ chọn lô và serial của linh kiện theo định mức, rồi nhập lô
+  hoặc serial mới cho thành phẩm. Tổng giá vốn của linh kiện chuyển sang bộ.
+- Serial đã dùng lưu liên kết tới phiếu lắp bộ và rời tồn khả dụng. Phiếu
+  và bản in lưu dấu lô và serial đã xuất, đã nhập.
+
+---
+
 # Cập nhật 0.7.0 — 06/11/2026
 
 - Phân bổ nhiều lô cho một dòng khi nhận hàng, bán, chuyển kho, xử lý chất

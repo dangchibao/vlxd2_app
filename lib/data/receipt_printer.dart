@@ -230,7 +230,9 @@ class ReceiptRenderer {
                 'Lô: ${line['lotId']}',
                 style: const pw.TextStyle(fontSize: 8),
               ),
-            if (line['serials'] is List && (line['serials'] as List).isNotEmpty)
+            if (kind != 'assemble' &&
+                line['serials'] is List &&
+                (line['serials'] as List).isNotEmpty)
               pw.Text(
                 'Serial: ${(line['serials'] as List).join(', ')}',
                 style: const pw.TextStyle(fontSize: 8),
@@ -241,6 +243,17 @@ class ReceiptRenderer {
           ],
         ),
       );
+      if (line['serials'] case final List serials when kind == 'assemble') {
+        for (final serial in serials) {
+          rows.add(
+            pw.Text(
+              "Serial ${line['sku']}: $serial",
+              style: const pw.TextStyle(fontSize: 8),
+            ),
+          );
+        }
+        rows.add(pw.SizedBox(height: 7));
+      }
     }
     rows.add(pw.Divider());
     if ({'sale', 'quote', 'purchase', 'returnReceipt'}.contains(kind)) {
@@ -310,6 +323,24 @@ class ReceiptRenderer {
         ),
         pw.Text("Giá trị tồn: ${money(integerField(data, 'value'))}"),
       ]);
+    }
+    if (kind == 'assemble') {
+      if (data['lotAllocations'] case final List lots) {
+        for (final lot in lots) {
+          final color = lot['colorCode'] as String? ?? '';
+          rows.add(
+            pw.Text(
+              "Lô thành phẩm ${lot['lotId']}: ${quantity(lot['quantity'] as int)}"
+              "${color.isEmpty ? '' : ' • Màu $color'}",
+            ),
+          );
+        }
+      }
+      if (data['serials'] case final List serials) {
+        for (final serial in serials) {
+          rows.add(pw.Text('Serial thành phẩm: $serial'));
+        }
+      }
     }
     if (kind == 'inventoryCount') {
       rows.addAll([

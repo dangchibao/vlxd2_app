@@ -163,6 +163,29 @@ class AuthorityEngine {
     return result;
   }
 
+  Map<String, dynamic> _assemblyTracking(
+    Map<String, dynamic> product,
+    Map<String, dynamic> selection,
+    int quantity,
+  ) {
+    final mode = product['tracking'];
+    if (mode == 'lot') {
+      return {'lotAllocations': StockTracking.lots(selection, quantity)};
+    }
+    if (mode == 'serial') {
+      return {'serials': tracking.serials(selection, quantity)};
+    }
+    if (selection.containsKey('lotId') ||
+        selection.containsKey('lotAllocations') ||
+        selection.containsKey('serials')) {
+      throw const BusinessException(
+        'components',
+        'Mã hàng này chỉ quản lý theo số lượng.',
+      );
+    }
+    return {};
+  }
+
   String _stockId(String warehouse, String product, String quality) =>
       jsonEncode([warehouse, product, quality]);
   Future<Map<String, dynamic>> stock(
@@ -1067,15 +1090,20 @@ class AuthorityEngine {
               components.containsKey(componentSku) ||
               component.isEmpty ||
               component['active'] == false ||
-              (component['tracking'] ?? 'none') != 'none' ||
-              (component['components'] as Map?)?.isNotEmpty == true ||
-              trackingMode != 'none') {
+              (component['components'] as Map?)?.isNotEmpty == true) {
             throw const BusinessException(
               'components',
-              'Chọn mã thành phần đang kinh doanh, không theo lô/serial và không phải bộ sản phẩm.',
+              'Chọn mã thành phần đang kinh doanh và không phải bộ sản phẩm.',
             );
           }
-          components[componentSku] = entry.value as int;
+          final quantity = entry.value as int;
+          if (component['tracking'] == 'serial' && quantity % 1000 != 0) {
+            throw BusinessException(
+              'components',
+              'Định mức của $componentSku phải là số nguyên vì hàng có serial.',
+            );
+          }
+          components[componentSku] = quantity;
         }
         await store.writeProduct(
           Product(id: id, sku: sku, name: name, unit: unit, price: price),
@@ -1449,8 +1477,8 @@ class AuthorityEngine {
           final receivedLots = await tracking.receive(
             old['warehouse'] as String,
             l,
-            old['supplierId'] as String,
-            id,
+            supplier: old['supplierId'] as String,
+            purchase: id,
           );
           await _stockChange(
             old['warehouse'] as String,
@@ -1698,9 +1726,7 @@ class AuthorityEngine {
         final kits = integerField(p, 'kits', min: 1, max: 1000000);
         final kit = await read('catalog', productId);
         final components = kit['components'] as Map? ?? {};
-        if (components.isEmpty ||
-            kit['active'] == false ||
-            (kit['tracking'] ?? 'none') != 'none') {
+        if (components.isEmpty || kit['active'] == false) {
           throw const BusinessException(
             'components',
             'Bộ sản phẩm chưa có định mức hợp lệ.',
@@ -1712,6 +1738,40 @@ class AuthorityEngine {
             'Định mức đã đổi. Mở lại phiếu lắp bộ.',
           );
         }
+        final selections = <String, Map<String, dynamic>>{};
+        final rawSelections = p['componentTracking'] ?? const [];
+        if (rawSelections is! List ||
+            rawSelections.length > components.length) {
+          throw const BusinessException(
+            'components',
+            'Danh sách lô hoặc serial của thành phần không hợp lệ.',
+          );
+        }
+        for (final selection in rawSelections) {
+          if (selection is! Map<String, dynamic>) {
+            throw const BusinessException(
+              'components',
+              'Thông tin theo dõi thành phần không hợp lệ.',
+            );
+          }
+          final sku = textField(selection, 'sku').toUpperCase();
+          if (!components.containsKey(sku) || selections.containsKey(sku)) {
+            throw const BusinessException(
+              'components',
+              'Mã thành phần bị lặp hoặc không thuộc định mức.',
+            );
+          }
+          selections[sku] = selection;
+        }
+        final quantity = kits * 1000;
+        final output = p['outputTracking'] ?? <String, dynamic>{};
+        if (output is! Map<String, dynamic>) {
+          throw const BusinessException(
+            'components',
+            'Thông tin theo dõi bộ thành phẩm không hợp lệ.',
+          );
+        }
+        final finished = _assemblyTracking(kit, output, quantity);
         var total = 0;
         final lines = <Map<String, dynamic>>[];
         for (final entry in components.entries) {
@@ -1724,7 +1784,6 @@ class AuthorityEngine {
               componentId == productId ||
               item.isEmpty ||
               item['active'] == false ||
-              (item['tracking'] ?? 'none') != 'none' ||
               (item['components'] as Map?)?.isNotEmpty == true) {
             throw BusinessException(
               'components',
@@ -1737,9 +1796,26 @@ class AuthorityEngine {
             min: 1,
             max: 1000000000,
           );
+          final selection = _assemblyTracking(
+            item,
+            selections[sku] ?? {},
+            quantity,
+          );
+          if (selection.isNotEmpty) {
+            await tracking.remove(
+              warehouse,
+              {'productId': componentId, ...selection},
+              quantity,
+              'good',
+              status: 'assembled',
+              referenceKey: 'consumedByAssemblyId',
+              referenceId: id,
+            );
+          }
           final cost = await _issue(warehouse, componentId, quantity);
           total += cost;
           lines.add({
+            ...selection,
             'productId': componentId,
             'sku': sku,
             'name': item['name'],
@@ -1748,9 +1824,17 @@ class AuthorityEngine {
             'cost': cost,
           });
         }
-        final quantity = kits * 1000;
+        final receivedLots = finished.isEmpty
+            ? null
+            : await tracking.receive(warehouse, {
+                'productId': productId,
+                'quantity': quantity,
+                ...finished,
+              }, assemblyId: id);
         await _stockChange(warehouse, productId, quantity, total);
         return {
+          ...finished,
+          'lotAllocations': ?receivedLots,
           'warehouse': warehouse,
           'productId': productId,
           'name': kit['name'],

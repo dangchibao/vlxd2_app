@@ -59,20 +59,20 @@ trạm hoặc cờ đổi mật khẩu qua màn hình này.
 
 ## Chạy ứng dụng
 
-Các bản 0.7.0 nằm trong thư mục `dist`.
+Các bản 0.8.0 nằm trong thư mục `dist`.
 
-Khi cập nhật, hãy mở bản 0.7.0 trên máy trạm trước khi gửi phiếu có nhiều
+Khi cập nhật, hãy mở bản 0.8.0 trên máy trạm trước khi gửi phiếu có nhiều
 lô. Với hàng theo lô, nhập mã lô nếu chỉ dùng một lô. Nếu có nhiều lô trên
 một dòng, ví dụ dòng hàng 5 đơn vị gốc, nhập `A:2; B:3`. Khi nhận hàng có
 thể ghi mã màu riêng theo dạng `A:2:BE; B:3:XAM`. Khi trả hàng, nhập lô
 thực trả; ứng dụng hiển thị số lượng còn được trả của từng lô. Khi bán các
 lô khác mã màu, chỉ xác nhận trộn màu sau khi khách đồng ý.
 
-- Windows: giải nén `VLXD-Bay-Hai-Windows-0.7.0.zip` rồi mở
+- Windows: giải nén `VLXD-Bay-Hai-Windows-0.8.0.zip` rồi mở
   `app/vlxd_bay_hai.exe`. Giữ các DLL và thư mục `data` cạnh file chạy.
-- Android: `VLXD-Bay-Hai-Android-0.7.0.apk` có chữ ký debug dành cho cài thử
+- Android: `VLXD-Bay-Hai-Android-0.8.0.apk` có chữ ký debug dành cho cài thử
   ngoài Play Store. Hỗ trợ Android API 24 trở lên.
-- iPhone: giải nén `VLXD-Bay-Hai-PWA-0.7.0.zip` lên máy chủ tĩnh HTTPS, rồi
+- iPhone: giải nén `VLXD-Bay-Hai-PWA-0.8.0.zip` lên máy chủ tĩnh HTTPS, rồi
   thêm vào màn hình chính từ Safari theo mục PWA bên dưới.
 
 Để chạy từ mã nguồn:
@@ -127,8 +127,11 @@ giá âm thầm. Báo giá chuyển đơn giữ giá snapshot đã duyệt.
 ## Lắp bộ, xử lý hàng lỗi và bảo hành
 
 - Trong **Hàng hóa**, nhập định mức từng thành phần theo dạng `Mã=Số lượng`.
-  Đồng bộ xong, vào **Kho → Lắp bộ** để tạo phiếu. Phiếu chuyển giá vốn từ
-  thành phần sang bộ, kiểm tra tồn khả dụng và phiên bản định mức.
+  Đồng bộ xong, vào **Kho → Lắp bộ** để tạo phiếu. Với linh kiện theo lô,
+  nhập các lô thực xuất. Với linh kiện có serial, nhập các serial thực xuất.
+  Nếu thành phẩm theo lô, ghi lô nhập và mã màu nếu có. Nếu thành phẩm theo
+  serial, nhập một mã mới cho mỗi bộ. Phiếu kiểm tra tồn khả dụng và chuyển
+  giá vốn từ linh kiện sang bộ theo định mức đã xác nhận.
 - Trong **Kho**, mở tồn cách ly hoặc hàng hỏng để xác nhận hỏng, chuyển về
   cách ly sau sửa, xuất trả nhà cung cấp hoặc xuất hủy. Có trường lý do, ảnh
   HTTPS và số phiếu nhà cung cấp. Xử lý xuất trả ghi biến động tồn. Đối chiếu
@@ -141,7 +144,7 @@ giá âm thầm. Báo giá chuyển đơn giữ giá snapshot đã duyệt.
   mã dự phòng có thể cần mạng lúc mở camera lần đầu. Windows nhận mã từ
   máy quét USB dạng bàn phím hoặc ô nhập tay.
 
-Đóng bản Windows cũ trên máy trạm và mở bản 0.7.0 trước khi gửi lệnh lắp bộ
+Đóng bản Windows cũ trên máy trạm và mở bản 0.8.0 trước khi gửi lệnh lắp bộ
 hay xử lý hàng lỗi từ điện thoại.
 
 ## Công nợ, báo cáo kho, bảng giá và tem
@@ -159,7 +162,7 @@ hay xử lý hàng lỗi từ điện thoại.
   Xem trước hoặc lưu PDF 60 × 40 mm. Trên Windows có thể gửi in và xem lại
   nhật ký. Chọn đúng khổ giấy trên driver trước khi in.
 
-Đóng bản Windows cũ trên máy trạm và mở bản 0.7.0 trước khi gửi lệnh
+Đóng bản Windows cũ trên máy trạm và mở bản 0.8.0 trước khi gửi lệnh
 phân bổ thanh toán từ thiết bị khác.
 
 ## In K80

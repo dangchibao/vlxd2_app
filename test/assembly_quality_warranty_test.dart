@@ -111,6 +111,120 @@ void main() {
     },
   );
 
+  test('Assembly consumes exact lots and serials, rolls back on duplicate output, and keeps cost', () async {
+    await catalog('TILE', tracking: 'lot');
+    await catalog('DEVICE', tracking: 'serial');
+    await catalog(
+      'KIT',
+      tracking: 'serial',
+      components: {'TILE': 2000, 'DEVICE': 1000},
+    );
+    final lots = [
+      {'lotId': 'A', 'quantity': 3000},
+      {'lotId': 'B', 'quantity': 3000},
+    ];
+    await receive([
+      {...line('TILE', 6000), 'lotAllocations': lots},
+      line('DEVICE', 3000, serials: ['D1', 'D2', 'D3']),
+    ]);
+    final command = {
+      'productId': 'KIT',
+      'warehouse': 'main',
+      'catalogVersion': 1,
+      'kits': 2,
+      'componentTracking': [
+        {
+          'sku': 'TILE',
+          'lotAllocations': [
+            {'lotId': 'A', 'quantity': 1000},
+            {'lotId': 'B', 'quantity': 3000},
+          ],
+        },
+        {
+          'sku': 'DEVICE',
+          'serials': ['d1', 'd2'],
+        },
+      ],
+    };
+    Future<int?> lotQuantity(String product, String lot) async =>
+        (await engine.read(
+              'lotStock',
+              engine.tracking.positionId('main', product, lot, 'good'),
+            ))['quantity']
+            as int?;
+    await expectLater(
+      run(Operation.assemble, 'collision', {
+        ...command,
+        'outputTracking': {
+          'serials': ['KIT-1', 'D3'],
+        },
+      }),
+      throwsA(isA<BusinessException>().having((e) => e.code, 'code', 'serial')),
+    );
+    expect(await lotQuantity('TILE', 'A'), 3000);
+    expect(await lotQuantity('TILE', 'B'), 3000);
+    expect((await engine.read('serial', 'D1'))['status'], 'available');
+    expect(await engine.read('serial', 'KIT-1'), isEmpty);
+    expect(await engine.stock('main', 'KIT'), isEmpty);
+    expect((await engine.stock('main', 'TILE'))['value'], 60000);
+    final posted = await run(Operation.assemble, 'success', {
+      ...command,
+      'outputTracking': {
+        'serials': ['kit-1', 'kit-2'],
+      },
+    });
+    expect(posted['serials'], ['KIT-1', 'KIT-2']);
+    expect(posted['value'], 60000);
+    expect(await lotQuantity('TILE', 'A'), 2000);
+    expect(await lotQuantity('TILE', 'B'), 0);
+    final consumed = await engine.read('serial', 'D1');
+    expect(consumed['status'], 'assembled');
+    expect(consumed['consumedByAssemblyId'], 'success');
+    expect((await engine.read('serial', 'KIT-1'))['assemblyId'], 'success');
+    await expectLater(
+      sell('old-part', line('DEVICE', 1000, serials: ['D1'])),
+      throwsA(isA<BusinessException>()),
+    );
+    await sell('kit-sale', line('KIT', 1000, serials: ['KIT-1']));
+    expect((await engine.stock('main', 'KIT'))['value'], 30000);
+  });
+
+  test(
+    'Assembly creates sellable finished lots with their color and provenance',
+    () async {
+      await catalog('PART');
+      await catalog('KIT', tracking: 'lot', components: {'PART': 1500});
+      await receive([line('PART', 3000)]);
+      final payload = {
+        'productId': 'KIT',
+        'warehouse': 'main',
+        'catalogVersion': 1,
+        'kits': 2,
+      };
+      await expectLater(
+        run(Operation.assemble, 'missing-lot', payload),
+        throwsA(isA<BusinessException>()),
+      );
+      final posted = await run(Operation.assemble, 'lot-assembly', {
+        ...payload,
+        'outputTracking': {'lotId': 'NEW', 'colorCode': 'XAM'},
+      });
+      expect(posted['lotAllocations'], [
+        {'lotId': 'NEW', 'colorCode': 'XAM', 'quantity': 2000},
+      ]);
+      expect(
+        (await engine.read('lot', '["KIT","NEW"]'))['assemblyId'],
+        'lot-assembly',
+      );
+      await sell('kit-sale', {
+        ...line('KIT', 1000),
+        'lotId': 'NEW',
+        'colorCode': 'XAM',
+      });
+      expect((await engine.stock('main', 'KIT'))['value'], 15000);
+    },
+  );
+
   test('Quality disposition tracks serials and rejects stale or unauthorized writes', () async {
     await catalog('SER', tracking: 'serial');
     await receive([
