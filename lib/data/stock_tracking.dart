@@ -27,6 +27,55 @@ class StockTracking {
     String lot,
     String quality,
   ) => jsonEncode([warehouse, product, lot, quality]);
+  // Legacy lines use lotId; a split line carries explicit quantities.
+  static List<Map<String, dynamic>> lots(Map<String, dynamic> line, int total) {
+    final raw =
+        line['lotAllocations'] ??
+        [
+          {
+            'lotId': line['lotId'],
+            'quantity': total,
+            'colorCode': line['colorCode'],
+          },
+        ];
+    if (raw is! List || raw.isEmpty || raw.length > 10) {
+      throw const BusinessException('lot', 'Chọn từ 1 đến 10 lô mỗi dòng.');
+    }
+    final seen = <String>{};
+    final result = <Map<String, dynamic>>[];
+    var sum = 0;
+    for (final item in raw) {
+      if (item is! Map<String, dynamic>) {
+        throw const BusinessException('lot', 'Phân bổ lô không hợp lệ.');
+      }
+      final lot = item['lotId'], color = item['colorCode'];
+      if (lot is! String ||
+          lot.trim().isEmpty ||
+          lot.trim().length > 80 ||
+          !seen.add(lot.trim()) ||
+          (color != null && (color is! String || color.trim().length > 80))) {
+        throw const BusinessException(
+          'lot',
+          'Mã lô hoặc mã màu không hợp lệ, hoặc lô bị trùng.',
+        );
+      }
+      final q = integerField(item, 'quantity', min: 1, max: 1000000000);
+      sum += q;
+      result.add({
+        'lotId': lot.trim(),
+        'quantity': q,
+        if (color is String) 'colorCode': color.trim(),
+      });
+    }
+    if (sum != total) {
+      throw const BusinessException(
+        'lot',
+        'Tổng số lượng các lô phải bằng số lượng dòng hàng.',
+      );
+    }
+    return result;
+  }
+
   List<String> serials(Map<String, dynamic> line, int quantity) {
     final raw = line['serials'];
     if (raw is! List ||
@@ -76,7 +125,7 @@ class StockTracking {
     });
   }
 
-  Future<void> receive(
+  Future<List<Map<String, dynamic>>?> receive(
     String warehouse,
     Map<String, dynamic> line,
     String supplier,
@@ -86,28 +135,44 @@ class StockTracking {
         quantity = integerField(line, 'quantity', min: 1),
         quality = line['quality'] as String? ?? 'good';
     final tracking = await mode(product);
-    if (tracking == 'none') return;
-    final lot = tracking == 'lot' ? textField(line, 'lotId') : '';
+    if (tracking == 'none') return null;
     if (tracking == 'lot') {
-      final lotKey = jsonEncode([product, lot]);
-      final previous = await read('lot', lotKey);
-      final color = line['colorCode'] as String? ?? '';
-      if (previous.isNotEmpty && previous['colorCode'] != color) {
-        throw const BusinessException(
-          'lot',
-          'Mã màu khác thông tin lô đã nhập.',
+      final allocations = lots(line, quantity);
+      for (final allocation in allocations) {
+        final lot = allocation['lotId'] as String;
+        final lotKey = jsonEncode([product, lot]);
+        final previous = await read('lot', lotKey);
+        final color =
+            allocation['colorCode'] as String? ??
+            previous['colorCode'] as String? ??
+            '';
+        if (previous.isNotEmpty && previous['colorCode'] != color) {
+          throw const BusinessException(
+            'lot',
+            'Mã màu khác thông tin lô đã nhập.',
+          );
+        }
+        await write('lot', lotKey, {
+          ...previous,
+          'productId': product,
+          'lotId': lot,
+          'colorCode': color,
+          'supplierId': previous['supplierId'] ?? supplier,
+          'purchaseId': previous['purchaseId'] ?? purchase,
+          'receivedAt':
+              previous['receivedAt'] ??
+              DateTime.now().toUtc().toIso8601String(),
+        });
+        allocation['colorCode'] = color;
+        await _position(
+          warehouse,
+          product,
+          lot,
+          quality,
+          allocation['quantity'] as int,
         );
       }
-      await write('lot', lotKey, {
-        ...previous,
-        'productId': product,
-        'lotId': lot,
-        'colorCode': color,
-        'supplierId': supplier,
-        'purchaseId': purchase,
-        'receivedAt': DateTime.now().toUtc().toIso8601String(),
-      });
-      await _position(warehouse, product, lot, quality, quantity);
+      return allocations;
     } else {
       for (final serial in serials(line, quantity)) {
         if ((await read('serial', serial)).isNotEmpty) {
@@ -127,23 +192,49 @@ class StockTracking {
         });
       }
     }
+    return null;
   }
 
-  Future<void> issue(
+  Future<List<Map<String, dynamic>>?> issue(
     String warehouse,
     Map<String, dynamic> line,
-    String saleId,
-  ) async {
+    String saleId, {
+    required bool allowMixedColors,
+  }) async {
     final product = textField(line, 'productId'),
         quantity = integerField(line, 'quantity', min: 1);
     final tracking = await mode(product);
     if (tracking == 'lot') {
-      final lot = textField(line, 'lotId');
-      final info = await read('lot', jsonEncode([product, lot]));
-      if (line['colorCode'] != null && line['colorCode'] != info['colorCode']) {
-        throw const BusinessException('lot', 'Mã màu không khớp với lô hàng.');
+      final allocations = lots(line, quantity);
+      final colors = <String>{};
+      for (final allocation in allocations) {
+        final lot = allocation['lotId'] as String;
+        final info = await read('lot', jsonEncode([product, lot]));
+        final color = info['colorCode'] as String? ?? '';
+        if (allocation['colorCode'] != null &&
+            allocation['colorCode'] != color) {
+          throw const BusinessException(
+            'lot',
+            'Mã màu không khớp với lô hàng.',
+          );
+        }
+        allocation['colorCode'] = color;
+        colors.add(color);
+        await _position(
+          warehouse,
+          product,
+          lot,
+          'good',
+          -(allocation['quantity'] as int),
+        );
       }
-      await _position(warehouse, product, lot, 'good', -quantity);
+      if (colors.length > 1 && !allowMixedColors) {
+        throw const BusinessException(
+          'lot',
+          'Các lô khác mã màu. Chọn lại lô hoặc xác nhận khách đồng ý trộn màu.',
+        );
+      }
+      return allocations;
     } else if (tracking == 'serial') {
       for (final serial in serials(line, quantity)) {
         final old = await read('serial', serial);
@@ -163,6 +254,7 @@ class StockTracking {
         });
       }
     }
+    return null;
   }
 
   Future<void> move(
@@ -176,9 +268,12 @@ class StockTracking {
         quantity = integerField(line, 'quantity', min: 1);
     final tracking = await mode(product);
     if (tracking == 'lot') {
-      final lot = textField(line, 'lotId');
-      await _position(from, product, lot, fromQuality, -quantity);
-      await _position(to, product, lot, toQuality, quantity);
+      for (final allocation in lots(line, quantity)) {
+        final lot = allocation['lotId'] as String,
+            q = allocation['quantity'] as int;
+        await _position(from, product, lot, fromQuality, -q);
+        await _position(to, product, lot, toQuality, q);
+      }
     } else if (tracking == 'serial') {
       for (final serial in serials(line, quantity)) {
         final old = await read('serial', serial);
@@ -200,7 +295,7 @@ class StockTracking {
     }
   }
 
-  Future<void> returnGoods(
+  Future<List<Map<String, dynamic>>?> returnGoods(
     String warehouse,
     Map<String, dynamic> line,
     Map<String, dynamic> original,
@@ -210,13 +305,43 @@ class StockTracking {
         quantity = integerField(line, 'quantity', min: 1);
     final tracking = await mode(product);
     if (tracking == 'lot') {
-      await _position(
-        warehouse,
-        product,
-        textField(original, 'lotId'),
-        'quarantine',
-        quantity,
-      );
+      final issued = lots(original, original['quantity'] as int);
+      final previously = <String, int>{
+        for (final item in original['returnedByLot'] as List? ?? [])
+          item['lotId'] as String: item['quantity'] as int,
+      };
+      final requested =
+          issued.length == 1 &&
+              line['lotAllocations'] == null &&
+              (line['lotId'] ?? '') == ''
+          ? [
+              {...issued.single, 'quantity': quantity},
+            ]
+          : lots(line, quantity);
+      for (final allocation in requested) {
+        final lot = allocation['lotId'] as String,
+            q = allocation['quantity'] as int;
+        final source = issued.where((item) => item['lotId'] == lot).firstOrNull;
+        final prior = issued.length == 1
+            ? original['returned'] as int? ?? 0
+            : previously[lot] ?? 0;
+        if (source == null || prior + q > (source['quantity'] as int)) {
+          throw const BusinessException(
+            'lot',
+            'Lô không thuộc đơn hoặc số trả vượt số còn lại của lô.',
+          );
+        }
+        if (issued.length > 1) previously[lot] = prior + q;
+        allocation['colorCode'] = source['colorCode'] ?? '';
+        await _position(warehouse, product, lot, 'quarantine', q);
+      }
+      if (issued.length > 1) {
+        original['returnedByLot'] = [
+          for (final entry in previously.entries)
+            {'lotId': entry.key, 'quantity': entry.value},
+        ];
+      }
+      return requested;
     } else if (tracking == 'serial') {
       final sold = (original['serials'] as List)
           .map((s) => (s as String).trim().toUpperCase())
@@ -241,6 +366,7 @@ class StockTracking {
         });
       }
     }
+    return null;
   }
 
   Future<void> adjust(
@@ -289,13 +415,15 @@ class StockTracking {
     final product = textField(line, 'productId');
     final tracking = await mode(product);
     if (tracking == 'lot') {
-      await _position(
-        warehouse,
-        product,
-        textField(line, 'lotId'),
-        quality,
-        -quantity,
-      );
+      for (final allocation in lots(line, quantity)) {
+        await _position(
+          warehouse,
+          product,
+          allocation['lotId'] as String,
+          quality,
+          -(allocation['quantity'] as int),
+        );
+      }
     } else if (tracking == 'serial') {
       for (final serial in serials(line, quantity)) {
         final old = await read('serial', serial);

@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 
 import '../data/app_runtime.dart';
 import '../data/database.dart';
+import '../data/stock_tracking.dart';
 import '../domain/operations.dart';
 import '../domain/product_policy.dart';
 import 'material_calculator.dart';
@@ -28,6 +29,43 @@ List<String> parseSerials(String text) => text
     .map((s) => s.trim().toUpperCase())
     .where((s) => s.isNotEmpty)
     .toList();
+const lotEntryHelp = 'Một lô: A • Nhiều lô: A:2; B:3 (đơn vị gốc)';
+
+Map<String, dynamic> lotFields(String input, int quantity, {String? color}) {
+  final text = input.trim();
+  if (text.isEmpty) return {};
+  if (!text.contains(';') && !text.contains(':')) {
+    return {
+      'lotId': text,
+      if (color != null && color.isNotEmpty) 'colorCode': color,
+    };
+  }
+  final allocations = <Map<String, dynamic>>[];
+  for (final entry in text.split(';')) {
+    final parts = entry.split(':').map((p) => p.trim()).toList();
+    if (parts.length < 2 || parts.length > (color == null ? 2 : 3)) {
+      throw FormatException(
+        color == null
+            ? lotEntryHelp
+            : 'Nhập A:2:MÀU1; B:3:MÀU2 (mã màu có thể bỏ trống).',
+      );
+    }
+    allocations.add({
+      'lotId': parts[0],
+      'quantity': parseFixed(parts[1], 3),
+      if (parts.length == 3 && parts[2].isNotEmpty)
+        'colorCode': parts[2]
+      else if (color != null && color.isNotEmpty)
+        'colorCode': color,
+    });
+  }
+  return {
+    'lotAllocations': StockTracking.lots({
+      'lotAllocations': allocations,
+    }, quantity),
+  };
+}
+
 int coordinate(String text, int limit) {
   final raw = text.trim();
   final value =
@@ -398,6 +436,8 @@ Future<void> commandDialog(
                         busy = false;
                         error = e is BusinessException
                             ? e.message
+                            : e is FormatException
+                            ? e.message
                             : 'Không lưu được chứng từ.';
                       });
                     }
@@ -518,7 +558,7 @@ class _OrderComposerState extends State<OrderComposer> {
   Timer? autosave;
   Future<void> pendingSave = Future.value();
   bool submitted = false;
-  bool reserveOrder = false;
+  bool reserveOrder = false, allowMixedLotColors = false;
   final quantities = <String, TextEditingController>{},
       costs = <String, TextEditingController>{};
   final warehouse = TextEditingController(text: 'main'),
@@ -534,10 +574,14 @@ class _OrderComposerState extends State<OrderComposer> {
   final catalog = <String, Map<String, dynamic>>{};
   final selectedUnits = <String, String>{};
   final physicalStock = <String, int>{}, heldStock = <String, int>{};
+  final lotPositions = <String, List<Map<String, dynamic>>>{};
+  final lotColors = <String, String>{};
   StreamSubscription<List<BusinessRecord>>? stockSubscription;
   void stockChanged(List<BusinessRecord> rows) {
     physicalStock.clear();
     heldStock.clear();
+    lotPositions.clear();
+    lotColors.clear();
     for (final row in rows) {
       final data = recordData(row);
       final key = jsonEncode([data['warehouse'], data['productId']]);
@@ -545,6 +589,15 @@ class _OrderComposerState extends State<OrderComposer> {
         physicalStock[key] = data['quantity'] as int;
       }
       if (row.kind == 'reservedStock') heldStock[key] = data['quantity'] as int;
+      if (row.kind == 'lotStock' &&
+          data['quality'] == 'good' &&
+          (data['quantity'] as int) > 0) {
+        (lotPositions[key] ??= []).add(data);
+      }
+      if (row.kind == 'lot') {
+        lotColors[jsonEncode([data['productId'], data['lotId']])] =
+            data['colorCode'] as String? ?? '';
+      }
     }
     if (mounted && !loading) setState(() {});
   }
@@ -570,7 +623,9 @@ class _OrderComposerState extends State<OrderComposer> {
     try {
       final db = database;
       final stockQuery = db.select(db.businessRecords)
-        ..where((r) => r.kind.isIn(['stock', 'reservedStock']));
+        ..where(
+          (r) => r.kind.isIn(['stock', 'reservedStock', 'lotStock', 'lot']),
+        );
       stockChanged(await stockQuery.get());
       stockSubscription = stockQuery.watch().listen(stockChanged);
       products = await db.select(db.products).get();
@@ -595,6 +650,7 @@ class _OrderComposerState extends State<OrderComposer> {
         dueDate.text = data['dueDate'] as String? ?? '';
         party = data['party'] as String?;
         reserveOrder = data['reserveOrder'] as bool? ?? false;
+        allowMixedLotColors = data['allowMixedLotColors'] == true;
         for (final item in data['items'] as List) {
           final key = item['productId'] as String;
           if (!products.any((p) => p.id == key)) {
@@ -661,6 +717,7 @@ class _OrderComposerState extends State<OrderComposer> {
     'dueDate': dueDate.text,
     'party': party,
     'reserveOrder': reserveOrder,
+    'allowMixedLotColors': allowMixedLotColors,
     'items': [
       ...missingItems,
       for (final entry in quantities.entries)
@@ -773,8 +830,11 @@ class _OrderComposerState extends State<OrderComposer> {
             if (!widget.purchase) 'saleUnit': selectedUnits[entry.key],
             if (!widget.purchase)
               'saleQuantity': parseFixed(entry.value.text, 3),
-            if (trackingModes[entry.key] == 'lot')
-              'lotId': trackingInputs[entry.key]!.text.trim(),
+            if (!widget.purchase && trackingModes[entry.key] == 'lot')
+              ...lotFields(
+                trackingInputs[entry.key]!.text,
+                baseQuantity(entry.key),
+              ),
             if (trackingModes[entry.key] == 'serial')
               'serials': parseSerials(trackingInputs[entry.key]!.text),
             if (!widget.purchase) 'expectedPrice': priceFor(entry.key),
@@ -797,6 +857,8 @@ class _OrderComposerState extends State<OrderComposer> {
             'lines': lines,
             if (!widget.purchase) 'discount': int.parse(discount.text),
             if (!widget.purchase) 'surcharge': int.parse(surcharge.text),
+            if (!widget.purchase && allowMixedLotColors)
+              'allowMixedLotColors': true,
             widget.purchase ? 'expectedAt' : 'dueAt': dueDate.text.trim(),
           },
           syncNow: false,
@@ -816,6 +878,8 @@ class _OrderComposerState extends State<OrderComposer> {
       if (mounted) {
         setState(
           () => message = e is BusinessException
+              ? e.message
+              : e is FormatException
               ? e.message
               : 'Không lưu được đơn.',
         );
@@ -1075,6 +1139,35 @@ class _OrderComposerState extends State<OrderComposer> {
                               );
                             },
                           ),
+                          if (!widget.purchase && trackingModes[id] == 'lot')
+                            Builder(
+                              builder: (context) {
+                                final lots =
+                                    lotPositions[jsonEncode([
+                                      warehouse.text.trim(),
+                                      id,
+                                    ])] ??
+                                    [];
+                                if (lots.isEmpty) {
+                                  return const Text(
+                                    'Chưa có tồn lô hàng tốt đã đồng bộ.',
+                                  );
+                                }
+                                final preview = lots
+                                    .take(5)
+                                    .map((lot) {
+                                      final label = lot['lotId'];
+                                      final color =
+                                          lotColors[jsonEncode([id, label])] ??
+                                          '';
+                                      return '$label${color.isEmpty ? '' : ' ($color)'}: ${qty(lot['quantity'] as int)}';
+                                    })
+                                    .join(' • ');
+                                return Text(
+                                  'Tồn lô: $preview${lots.length > 5 ? ' • +${lots.length - 5} lô' : ''}',
+                                );
+                              },
+                            ),
                           if (!widget.purchase &&
                               {'lot', 'serial'}.contains(trackingModes[id]))
                             TextField(
@@ -1084,6 +1177,10 @@ class _OrderComposerState extends State<OrderComposer> {
                                 labelText: trackingModes[id] == 'lot'
                                     ? 'Mã lô xuất'
                                     : 'Serial xuất (ngăn cách bằng dấu phẩy)',
+                                helperText: trackingModes[id] == 'lot'
+                                    ? lotEntryHelp
+                                    : null,
+                                helperMaxLines: 2,
                               ),
                             ),
                         ],
@@ -1091,6 +1188,24 @@ class _OrderComposerState extends State<OrderComposer> {
                     ),
                   ),
                 if (!widget.purchase) ...[
+                  if (quantities.keys.any(
+                    (id) =>
+                        trackingModes[id] == 'lot' &&
+                        trackingInputs[id]!.text.contains(';'),
+                  ))
+                    CheckboxListTile(
+                      title: const Text('Khách đồng ý dùng lô khác mã màu'),
+                      subtitle: const Text(
+                        'Kiểm tra mã màu trước khi trộn các lô gạch.',
+                      ),
+                      value: allowMixedLotColors,
+                      onChanged: busy
+                          ? null
+                          : (v) {
+                              allowMixedLotColors = v ?? false;
+                              changed();
+                            },
+                    ),
                   if (!widget.quote)
                     SwitchListTile(
                       title: const Text('Giữ hàng / Xin duyệt đơn vượt tồn'),
@@ -1208,13 +1323,28 @@ Future<void> lineAction(
                                         : 'returned'] as int?) ?? 0)}',
                           ),
                         ),
-                        if (op == Operation.receive) ...[
+                        if (op == Operation.receive ||
+                            (op == Operation.returnSale &&
+                                lines[i]['lotAllocations'] is List &&
+                                (lines[i]['lotAllocations'] as List).length >
+                                    1))
                           TextField(
                             controller: lotInputs[i],
-                            decoration: const InputDecoration(
-                              labelText: 'Mã lô (nếu theo dõi lô)',
+                            decoration: InputDecoration(
+                              labelText: op == Operation.returnSale
+                                  ? 'Lô thực trả'
+                                  : 'Lô nhận (nếu theo dõi)',
+                              helperText: op == Operation.receive
+                                  ? 'Một lô: A • Nhiều lô: A:2:MÀU1; B:3:MÀU2'
+                                  : 'Còn được trả: ${(lines[i]['lotAllocations'] as List).map((lot) {
+                                      final returned = (lines[i]['returnedByLot'] as List? ?? []).where((item) => item['lotId'] == lot['lotId']).firstOrNull;
+                                      final previous = returned?['quantity'] as int? ?? 0;
+                                      return "${lot['lotId']}: ${qty((lot['quantity'] as int) - previous)}";
+                                    }).join('; ')}. $lotEntryHelp',
+                              helperMaxLines: 5,
                             ),
                           ),
+                        if (op == Operation.receive) ...[
                           TextField(
                             controller: colors[i],
                             decoration: const InputDecoration(
@@ -1291,14 +1421,27 @@ Future<void> lineAction(
                       for (var i = 0; i < lines.length; i++) {
                         final q = parseFixed(controllers[i].text, 3);
                         if (q > 0) {
+                          if (op == Operation.returnSale &&
+                              lines[i]['lotAllocations'] is List &&
+                              (lines[i]['lotAllocations'] as List).length > 1 &&
+                              lotInputs[i].text.trim().isEmpty) {
+                            throw const FormatException(
+                              'Nhập mã lô thực trả cho dòng đã xuất nhiều lô.',
+                            );
+                          }
                           selected.add({
                             'productId': lines[i]['productId'],
                             'quantity': q,
                             if (op == Operation.receive) 'quality': quality,
-                            if (op == Operation.receive)
-                              'lotId': lotInputs[i].text.trim(),
-                            if (op == Operation.receive)
-                              'colorCode': colors[i].text.trim(),
+                            if (op == Operation.receive ||
+                                op == Operation.returnSale)
+                              ...lotFields(
+                                lotInputs[i].text,
+                                q,
+                                color: op == Operation.receive
+                                    ? colors[i].text.trim()
+                                    : null,
+                              ),
                             if (op == Operation.receive ||
                                 op == Operation.returnSale)
                               'serials': parseSerials(serialInputs[i].text),
@@ -1840,7 +1983,11 @@ class StockPage extends StatelessWidget {
         'Liên kết HTTPS ảnh bằng chứng',
         optional: true,
       ),
-      const InputField('lotId', 'Mã lô nếu theo lô', optional: true),
+      const InputField(
+        'lotText',
+        'Lô: A hoặc A:2; B:3 (đơn vị gốc)',
+        optional: true,
+      ),
       const InputField(
         'serialText',
         'Serial nếu theo dõi, ngăn cách bằng dấu phẩy',
@@ -1848,8 +1995,13 @@ class StockPage extends StatelessWidget {
       ),
     ],
     transform: (data) =>
-        {...data, 'serials': parseSerials(data['serialText'] as String? ?? '')}
-          ..remove('serialText'),
+        {
+            ...data,
+            ...lotFields(data['lotText'] as String, data['quantity'] as int),
+            'serials': parseSerials(data['serialText'] as String? ?? ''),
+          }
+          ..remove('serialText')
+          ..remove('lotText'),
   );
 
   Future<void> movement(BuildContext context, Operation operation) async {
@@ -1884,7 +2036,11 @@ class StockPage extends StatelessWidget {
           scale: 3,
         ),
         const InputField('reason', 'Lý do'),
-        const InputField('lotId', 'Mã lô (nếu theo dõi lô)', optional: true),
+        const InputField(
+          'lotText',
+          'Lô: A hoặc A:2; B:3 (đơn vị gốc)',
+          optional: true,
+        ),
         const InputField(
           'serialText',
           'Serial (ngăn cách bằng dấu phẩy, nếu có)',
@@ -1893,10 +2049,18 @@ class StockPage extends StatelessWidget {
       ],
       fixed: const {},
       transform: (data) {
-        final tracked = {
-          ...data,
-          'serials': parseSerials(data['serialText'] as String? ?? ''),
-        }..remove('serialText');
+        final lots = lotFields(
+          data['lotText'] as String,
+          data['quantity'] as int,
+        );
+        final tracked =
+            {
+                ...data,
+                ...lots,
+                'serials': parseSerials(data['serialText'] as String? ?? ''),
+              }
+              ..remove('serialText')
+              ..remove('lotText');
         return operation == Operation.transfer
             ? {
                 'fromWarehouse': data['fromWarehouse'],
@@ -1906,7 +2070,7 @@ class StockPage extends StatelessWidget {
                   {
                     'productId': data['productId'],
                     'quantity': data['quantity'],
-                    'lotId': data['lotId'],
+                    ...lots,
                     'serials': tracked['serials'],
                   },
                 ],

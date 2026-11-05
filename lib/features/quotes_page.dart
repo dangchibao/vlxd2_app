@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../data/app_runtime.dart';
 import '../data/database.dart';
 import '../domain/operations.dart';
+import '../domain/lot_labels.dart';
 import 'business_pages.dart';
 import 'reports_search.dart';
 import 'business_receipt.dart';
@@ -33,6 +34,7 @@ class QuotesPage extends StatelessWidget {
           'surcharge': '${data['surcharge'] ?? 0}',
           'dueDate': data['dueAt'] ?? '',
           'party': data['customerId'],
+          'allowMixedLotColors': data['allowMixedLotColors'] == true,
           'items': [
             for (final line in data['lines'] as List)
               {
@@ -42,9 +44,9 @@ class QuotesPage extends StatelessWidget {
                 ),
                 'saleUnit': line['saleUnit'] ?? line['unit'],
                 'cost': '0',
-                'trackingInput':
-                    line['lotId'] ??
-                    (line['serials'] as List? ?? []).join(', '),
+                'trackingInput': trackingDraftInput(
+                  line as Map<String, dynamic>,
+                ),
               },
           ],
         }),

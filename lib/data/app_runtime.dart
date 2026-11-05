@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 
 import '../domain/operations.dart';
+import '../domain/lot_labels.dart';
 import 'database.dart';
 import 'firebase_auth_rest.dart';
 import 'firestore_rest.dart';
@@ -657,6 +658,7 @@ class AppRuntime extends ChangeNotifier {
           operation == Operation.reservation ||
           receipt.result['code'] == 'oversell',
       'recoveredFrom': commandId,
+      'allowMixedLotColors': source['allowMixedLotColors'] == true,
       'items': [
         for (final line in source['lines'] as List)
           {
@@ -666,8 +668,7 @@ class AppRuntime extends ChangeNotifier {
             ),
             'saleUnit': line['saleUnit'],
             'cost': '${line['unitCost'] ?? 0}',
-            'trackingInput':
-                line['lotId'] ?? (line['serials'] as List? ?? []).join(', '),
+            'trackingInput': trackingDraftInput(line as Map<String, dynamic>),
           },
       ],
     }, createOutbox: false);

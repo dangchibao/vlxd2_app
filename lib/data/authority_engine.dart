@@ -666,7 +666,34 @@ class AuthorityEngine {
                   line['productId'] as String,
                 ),
                 wanted = line['quantity'] as int;
-            final q = available < wanted ? available : wanted;
+            var q = available < wanted ? available : wanted;
+            if (line['lotAllocations'] != null) {
+              final lots = <Map<String, dynamic>>[];
+              var remaining = q;
+              final product = line['productId'] as String;
+              for (final lot in StockTracking.lots(line, wanted)) {
+                if (remaining <= 0) break;
+                final position = await read(
+                  'lotStock',
+                  tracking.positionId(
+                    warehouse,
+                    product,
+                    lot['lotId'] as String,
+                    'good',
+                  ),
+                );
+                final physical = position['quantity'] as int? ?? 0;
+                final requested = lot['quantity'] as int;
+                final limit = requested < remaining ? requested : remaining;
+                final take = physical < limit ? physical : limit;
+                if (take > 0) {
+                  lots.add({...lot, 'quantity': take});
+                  remaining -= take;
+                }
+              }
+              q -= remaining;
+              line['approvedLotAllocations'] = lots;
+            }
             if (q > 0) {
               await _reserve(warehouse, line['productId'] as String, q);
             }
@@ -751,15 +778,19 @@ class AuthorityEngine {
                 'Phần giao không đủ đơn vị quy đổi; đổi sang đơn vị gốc trước khi ghi sổ.',
               );
             }
-            lines.add({
-              ...line,
-              'quantity': q,
-              'saleQuantity':
-                  (BigInt.from(q) * BigInt.from(1000) ~/ BigInt.from(factor))
-                      .toInt(),
-              if (partial && line['serials'] is List)
-                'serials': (line['serials'] as List).take(q ~/ 1000).toList(),
-            });
+            lines.add(
+              {
+                ...line,
+                if (partial && line['lotAllocations'] != null)
+                  'lotAllocations': line['approvedLotAllocations'],
+                'quantity': q,
+                'saleQuantity':
+                    (BigInt.from(q) * BigInt.from(1000) ~/ BigInt.from(factor))
+                        .toInt(),
+                if (partial && line['serials'] is List)
+                  'serials': (line['serials'] as List).take(q ~/ 1000).toList(),
+              }..remove('approvedLotAllocations'),
+            );
           }
         }
         if (partial && (old['discount'] as int) > 0) {
@@ -915,6 +946,7 @@ class AuthorityEngine {
             'surcharge': old['surcharge'] ?? 0,
             'dueAt': old['dueAt'] ?? '',
             'quoteId': id,
+            if (old['allowMixedLotColors'] == true) 'allowMixedLotColors': true,
             'lines': [
               for (final line in old['lines'] as List)
                 {
@@ -1236,7 +1268,7 @@ class AuthorityEngine {
                 original,
               ) -
               roundedRatio(target['cost'] as int, previous, original);
-          await tracking.returnGoods(
+          final returnedLots = await tracking.returnGoods(
             old['warehouse'] as String,
             returned,
             target,
@@ -1252,6 +1284,7 @@ class AuthorityEngine {
           target['returned'] = previous + quantity;
           returnSnapshots.add({
             ...returned,
+            'lotAllocations': ?returnedLots,
             'name': target['name'],
             'sku': target['sku'],
             'unit': target['unit'],
@@ -1355,6 +1388,7 @@ class AuthorityEngine {
         final fees = p['purchaseCosts'] == null
             ? 0
             : integerField(p, 'purchaseCosts');
+        final receiptLines = <Map<String, dynamic>>[];
         var weightTotal = 0, accumulatedWeight = 0, allocatedFees = 0;
         final weights = <String, int>{};
         for (final receivedLine in received) {
@@ -1412,7 +1446,7 @@ class AuthorityEngine {
               nextFees -
               allocatedFees;
           allocatedFees = nextFees;
-          await tracking.receive(
+          final receivedLots = await tracking.receive(
             old['warehouse'] as String,
             l,
             old['supplierId'] as String,
@@ -1425,6 +1459,7 @@ class AuthorityEngine {
             value,
             quality: quality as String,
           );
+          receiptLines.add({...l, 'lotAllocations': ?receivedLots});
           ordered['received'] = done + quantity;
           receiptValue += value;
         }
@@ -1433,7 +1468,7 @@ class AuthorityEngine {
           'purchaseId': id,
           'supplierId': supplier,
           'warehouse': old['warehouse'],
-          'lines': received,
+          'lines': receiptLines,
           'total': receiptValue,
           'purchaseCosts': fees,
           'receivedAt': DateTime.now().toUtc().toIso8601String(),
@@ -1486,24 +1521,33 @@ class AuthorityEngine {
             );
           }
           final lineTotal = roundedRatio(price, quantity, 1000);
-          await tracking.issue(warehouse, l, id);
+          final issuedLots = await tracking.issue(
+            warehouse,
+            l,
+            id,
+            allowMixedColors: p['allowMixedLotColors'] == true,
+          );
           final lineCost = await _issue(warehouse, product.id, quantity);
           subtotal += lineTotal;
           cost += lineCost;
-          snapshots.add({
-            ...l,
-            if (quoted == null) ...await _terms(product, l, customer),
-            'sku': quoted?['sku'] ?? product.sku,
-            'name': quoted?['name'] ?? product.name,
-            'unit': quoted?['unit'] ?? product.unit,
-            'unitPrice': price,
-            'warrantyDays':
-                (await read('catalog', product.id))['warrantyDays'] as int? ??
-                0,
-            'total': lineTotal,
-            'cost': lineCost,
-            'delivered': 0,
-          });
+          snapshots.add(
+            {
+              ...l,
+              'lotAllocations': ?issuedLots,
+              'returned': 0,
+              if (quoted == null) ...await _terms(product, l, customer),
+              'sku': quoted?['sku'] ?? product.sku,
+              'name': quoted?['name'] ?? product.name,
+              'unit': quoted?['unit'] ?? product.unit,
+              'unitPrice': price,
+              'warrantyDays':
+                  (await read('catalog', product.id))['warrantyDays'] as int? ??
+                  0,
+              'total': lineTotal,
+              'cost': lineCost,
+              'delivered': 0,
+            }..remove('returnedByLot'),
+          );
         }
         final discount = integerField(p, 'discount');
         if (discount > subtotal) {

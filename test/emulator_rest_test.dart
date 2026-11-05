@@ -125,14 +125,6 @@ void main() {
       );
       final manager = await auth.signIn(managerEmail, password);
       final productId = 'product-$uid';
-      await store.commit(session, [
-        store.createWrite('stores/shop/catalog/$productId', {
-          'sku': 'A',
-          'name': 'Gạch',
-          'unit': 'viên',
-          'price': 20000,
-        }),
-      ]);
       final transport = FirestoreCommandTransport(
         store,
         'shop',
@@ -141,6 +133,24 @@ void main() {
       RemoteAuthorityProcessor processor() => RemoteAuthorityProcessor(
         FirestoreAuthorityStore(store, 'shop', () async => session),
       );
+      final catalog = BusinessCommand(
+        id: 'catalog-$uid',
+        entityId: productId,
+        operation: Operation.catalog,
+        payload: {
+          'sku': 'A-$uid',
+          'name': 'Gạch',
+          'unit': 'viên',
+          'price': 20000,
+          'tracking': 'lot',
+        },
+      );
+      await transport.submit(catalog, manager.uid);
+      expect((await processor().process(catalog.id))['tracking'], 'lot');
+      const allocations = [
+        {'lotId': 'A', 'quantity': 600, 'colorCode': 'BE'},
+        {'lotId': 'B', 'quantity': 400, 'colorCode': 'BE'},
+      ];
       final purchase = BusinessCommand(
         id: 'purchase-$uid',
         entityId: 'po-$uid',
@@ -164,7 +174,11 @@ void main() {
         expectedVersion: 1,
         payload: {
           'lines': [
-            {'productId': productId, 'quantity': 1000, 'expectedPrice': 20000},
+            {
+              'productId': productId,
+              'quantity': 1000,
+              'lotAllocations': allocations,
+            },
           ],
         },
       );
@@ -185,6 +199,7 @@ void main() {
                   'productId': productId,
                   'quantity': 1000,
                   'expectedPrice': 20000,
+                  'lotAllocations': allocations,
                 },
               ],
             },
@@ -198,6 +213,12 @@ void main() {
         sales.map((sale) => transport.receipt(sale.id)),
       );
       expect(receipts.where((r) => r?.status == 'confirmed').length, 1);
+      expect(
+        (receipts.singleWhere((r) => r?.status == 'confirmed')!.result['lines']
+                as List)
+            .single['lotAllocations'],
+        allocations,
+      );
       expect(receipts.where((r) => r?.status == 'error').length, 1);
       final authority = FirestoreAuthorityStore(
         store,

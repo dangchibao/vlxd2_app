@@ -1,3 +1,18 @@
+# Cập nhật 0.7.0 — 06/11/2026
+
+- Phân bổ nhiều lô cho một dòng khi nhận hàng, bán, chuyển kho, xử lý chất
+  lượng và trả hàng. Tổng tiền, giá vốn và công nợ vẫn tính theo dòng gốc.
+- Khi xuất các lô khác mã màu, trạm yêu cầu xác nhận. Hàng trả được kiểm tra
+  theo số lượng còn lại của từng lô trên đơn gốc và đưa về cách ly.
+- Duyệt giao một phần dùng lượng còn của từng lô đã chọn tại thời điểm duyệt,
+  và trạm kiểm tra lại tồn khi xuất. Phiếu PDF hiển thị số lượng từng lô.
+- Analyze sạch; 93 ca kiểm thử ứng dụng, 10 ca quyền Firestore và
+  1 ca tích hợp Firebase mô phỏng đạt.
+- Kiểm kê vẫn đếm theo từng lô. Lắp bộ hiện hỗ trợ hàng theo số lượng.
+  Camera Android/iPhone và máy in KV804 còn cần thử trên thiết bị thật.
+
+---
+
 # Cập nhật 0.6.0 — 06/11/2026
 
 - Công nợ có lịch sử và phân bổ một phiếu cho nhiều chứng từ. Trạm kiểm tra

@@ -216,7 +216,16 @@ class ReceiptRenderer {
                   pw.Text(money(amount)),
                 ],
               ),
-            if (line['lotId'] != null && (line['lotId'] as String).isNotEmpty)
+            if (line['lotAllocations'] is List)
+              for (final lot in line['lotAllocations'] as List)
+                pw.Text(
+                  "Lô ${lot['lotId']}: ${quantity(lot['quantity'] as int)}"
+                  "${(lot['colorCode'] as String? ?? '').isEmpty ? '' : ' • Màu ${lot['colorCode']}'}",
+                  style: const pw.TextStyle(fontSize: 8),
+                ),
+            if (line['lotAllocations'] == null &&
+                line['lotId'] != null &&
+                (line['lotId'] as String).isNotEmpty)
               pw.Text(
                 'Lô: ${line['lotId']}',
                 style: const pw.TextStyle(fontSize: 8),
