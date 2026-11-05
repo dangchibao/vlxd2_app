@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart' show driftRuntimeOptions;
+import 'package:drift/drift.dart' show driftRuntimeOptions, Value;
 
 import 'dart:convert';
 import 'dart:async';
@@ -55,6 +55,75 @@ void main() {
       throwsA(isA<AuthFailure>()),
     );
   });
+  test(
+    'Recovery copies only a server-rejected order into a new draft',
+    () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      addTearDown(db.close);
+      var serverStatus = 'confirmed';
+      final runtime = AppRuntime(
+        db,
+        config,
+        client: MockClient((request) async {
+          expect(request.url.path, endsWith('/receipts/order-command'));
+          return http.Response(
+            jsonEncode({
+              'name': 'receipt',
+              'fields': FirestoreRest.encodeFields({
+                'commandId': 'order-command',
+                'status': serverStatus,
+                'result': {'code': 'oversell'},
+              }),
+            }),
+            200,
+          );
+        }),
+        vault: MemoryVault(),
+        stationVault: MemoryVault(),
+      );
+      addTearDown(runtime.dispose);
+      const user = Actor('seller', StaffRole.sales);
+      runtime.actor = user;
+      runtime.session = AuthSession(
+        uid: user.uid,
+        idToken: 'fixture-token',
+        refreshToken: 'fixture-refresh',
+        expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      );
+      await runtime.sync.enqueue(
+        BusinessCommand(
+          id: 'order-command',
+          entityId: 'old-order',
+          operation: Operation.sale,
+          payload: {
+            'warehouse': 'main',
+            'customerId': 'customer',
+            'lines': [
+              {'productId': 'pipe', 'quantity': 2500, 'saleUnit': 'm'},
+            ],
+          },
+        ),
+        user,
+      );
+      await db
+          .update(db.outbox)
+          .write(const OutboxCompanion(status: Value('conflict')));
+      await expectLater(
+        runtime.recoverRejected('order-command'),
+        throwsA(isA<BusinessException>()),
+      );
+      expect(await db.select(db.drafts).get(), isEmpty);
+
+      serverStatus = 'conflict';
+      final draft = await runtime.recoverRejected('order-command');
+      final data = jsonDecode(draft.payload) as Map<String, dynamic>;
+      expect(draft.id, isNot('old-order'));
+      expect(data['recoveredFrom'], 'order-command');
+      expect(data['reserveOrder'], true);
+      expect(data['items'].single['quantity'], '2,5');
+      expect((await db.select(db.outbox).get()).single.id, 'order-command');
+    },
+  );
   test(
     'Runtime authenticates member and isolates databases when switching users',
     () async {

@@ -55,6 +55,17 @@ trạm hoặc cờ đổi mật khẩu qua màn hình này.
 
 ## Chạy ứng dụng
 
+Các bản 0.4 nằm trong thư mục `dist`.
+
+- Windows: giải nén `VLXD-Bay-Hai-Windows-0.4.zip` rồi mở
+  `app/vlxd_bay_hai.exe`. Giữ các DLL và thư mục `data` cạnh file chạy.
+- Android: `VLXD-Bay-Hai-Android-0.4.apk` có chữ ký debug dành cho cài thử
+  ngoài Play Store. Hỗ trợ Android API 24 trở lên.
+- iPhone: giải nén `VLXD-Bay-Hai-PWA-0.4.zip` lên máy chủ tĩnh HTTPS, rồi
+  thêm vào màn hình chính từ Safari theo mục PWA bên dưới.
+
+Để chạy từ mã nguồn:
+
 ```powershell
 flutter pub get
 flutter run -d windows --dart-define-from-file=config/firebase.public.json
@@ -67,8 +78,8 @@ thử cục bộ cũ; giao diện đó không ghi sổ cloud.
 
 Trên Windows, phiên trạm được lưu trong kho bảo mật của tài khoản Windows đã
 cấu hình. Khi chuyển sang máy khác, đăng nhập nhân viên rồi vào **Đồng bộ /
-Trạm** để kết nối bằng email ánh xạ của username trạm và mật khẩu riêng. Trạm cần còn chạy
-và có mạng để xác nhận nghiệp vụ của các thiết bị. Chưa có Windows Service tự
+Trạm** để kết nối bằng email ánh xạ của username trạm và mật khẩu riêng. Trạm
+cần còn chạy và có mạng để xác nhận nghiệp vụ của các thiết bị. Chưa có Windows Service tự
 chạy khi chưa mở app. Tắt trạm: các thiết bị vẫn lập nháp/lưu lệnh chờ, không
 coi đó là tồn kho hoặc công nợ đã xác nhận.
 

@@ -8,11 +8,13 @@
 
 Source 0.4 thêm giao diện bảng và tìm kiếm phân trang, biểu đồ doanh thu, tồn khả dụng khi lập đơn, cọc và hoàn cọc, phục hồi lệnh bị từ chối thành nháp, cùng kiểm soát phiên đăng nhập và xử lý lệnh sai kiểu dữ liệu. Giá vốn bình quân theo mã hàng và kho, có đối chiếu giá trị qua chuyển trạng thái chất lượng.
 
-Analyze sạch, 79 kiểm thử unit/widget đạt. Bộ chạy riêng trên emulator đạt 10 ca Rules và 1 kịch bản tích hợp Auth/Firestore REST. Kiểm thử worker ngoại tuyến đạt. Đã mở bản Windows QA với dữ liệu mô phỏng và kiểm tra cập nhật số lượng, tổng đơn và báo cáo. Dữ liệu QA chỉ nằm trong môi trường mô phỏng.
+Analyze sạch, 80 kiểm thử unit/widget đạt. Bộ chạy riêng trên emulator đạt 10 ca Rules và 1 kịch bản tích hợp Auth/Firestore REST. Kiểm thử worker ngoại tuyến đạt. Đã mở bản Windows QA với dữ liệu mô phỏng và kiểm tra cập nhật số lượng, tổng đơn và báo cáo. Dữ liệu QA chỉ nằm trong môi trường mô phỏng.
 
 Firebase `vlxd-bayhai-v1-261105` dùng Firestore Native miễn phí ở `asia-southeast1`. Email/Password đã bật, Rules đã triển khai và Auth đã xác nhận đăng nhập tài khoản `admin`. Quyền ghi sổ cần xác minh người dùng đã đổi mật khẩu khởi tạo. Chưa publish Hosting production. Xem [hướng dẫn vận hành](RUNNING_AND_SETUP.md).
 
 Windows 0.4 đã đóng gói tại `dist/VLXD-Bay-Hai-Windows-0.4.zip` và mở được màn hình đăng nhập. Tài khoản trạm `tram` đã xác thực và phiên được đọc lại thành công từ kho bảo mật trên máy Windows hiện tại. Trạm xử lý khi app Windows đang chạy, có mạng và có phiên nhân viên hợp lệ.
+
+APK 0.4 build thành công, chữ ký v2 hợp lệ và manifest có quyền Internet. PWA 0.4 đã đóng gói với 45 tài nguyên. Trình duyệt đã tải lại màn hình đăng nhập từ worker sau khi máy chủ thử nghiệm dừng.
 
 Còn cần hoàn thiện combo/lắp bộ, lịch sử giá và một số báo cáo chi tiết, quy trình xử lý hàng hỏng và đổi bảo hành nâng cao, hiển thị ảnh hàng hóa và quét barcode bằng camera. Chưa đo hiệu năng trên dữ liệu lớn hoặc thử thiết bị thật Android, iPhone và KV804.
 
