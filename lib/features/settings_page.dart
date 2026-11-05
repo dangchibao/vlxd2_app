@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/app_runtime.dart';
 import '../domain/operations.dart';
 import 'business_pages.dart';
+import 'brand_mark.dart';
 
 class SettingsPage extends StatefulWidget {
   final AppRuntime runtime;
@@ -90,6 +91,13 @@ class _SettingsPageState extends State<SettingsPage> {
       const Text(
         'Thiết lập cửa hàng',
         style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+      ),
+      const Card(
+        child: ListTile(
+          leading: BrandMark(size: 48),
+          title: Text('VLXD Bảy Hải'),
+          subtitle: Text('Gò Dầu · Tây Ninh'),
+        ),
       ),
       ListTile(
         title: const Text('Kết nối'),

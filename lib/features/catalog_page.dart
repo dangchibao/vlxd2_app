@@ -6,6 +6,7 @@ import '../data/database.dart';
 import '../domain/operations.dart';
 import '../domain/product_policy.dart';
 import 'business_pages.dart';
+import 'catalog_art.dart';
 import 'material_calculator.dart';
 import 'reports_search.dart';
 
@@ -22,8 +23,13 @@ class CatalogPage extends StatelessWidget {
   Widget build(BuildContext context) => RecordList(
     runtime: runtime,
     kind: 'catalog',
-    title: 'Hàng hóa đa ngành',
+    title: 'Danh sách hàng hóa',
     actions: [
+      OutlinedButton.icon(
+        onPressed: () => SampleCatalog.open(context),
+        icon: const Icon(Icons.grid_view_outlined),
+        label: const Text('Danh mục mẫu'),
+      ),
       if (allowed(runtime, Operation.catalog))
         FilledButton.icon(
           onPressed: () => edit(context),
@@ -33,7 +39,7 @@ class CatalogPage extends StatelessWidget {
     ],
     item: (context, row, data) => Card(
       child: ListTile(
-        leading: const Icon(Icons.inventory_2_outlined),
+        leading: ProductPhoto(data['imageUrl']),
         title: Text('${data['sku']} • ${data['name']}'),
         subtitle: Text(
           '${data['group'] ?? ''} • ${data['brand'] ?? ''} ${data['model'] ?? ''}\n${vnd(data['price'] as int)} / ${data['unit']} ${data['active'] == false ? '• Ngừng kinh doanh' : ''}',
@@ -49,7 +55,16 @@ class CatalogPage extends StatelessWidget {
           context: context,
           builder: (context) => AlertDialog(
             title: Text(data['name'] as String),
-            content: SingleChildScrollView(child: RecordDetails(data: data)),
+            content: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ProductPhoto(data['imageUrl'], size: 128),
+                  const SizedBox(height: 12),
+                  RecordDetails(data: data),
+                ],
+              ),
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
@@ -280,7 +295,47 @@ class _CatalogEditorState extends State<CatalogEditor> {
         field('brand', 'Thương hiệu'),
         field('model', 'Model'),
         field('variantOf', 'SKU sản phẩm gốc (nếu là biến thể)'),
-        field('imageUrl', 'Đường dẫn ảnh HTTPS'),
+        ValueListenableBuilder(
+          valueListenable: fields['imageUrl']!,
+          builder: (context, value, _) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                ProductPhoto(value.text, size: 96),
+                PopupMenuButton<String>(
+                  enabled: !busy,
+                  onSelected: (selected) => fields['imageUrl']!.text = selected,
+                  itemBuilder: (context) => [
+                    for (final entry in sampleImages.entries)
+                      PopupMenuItem(
+                        value: entry.key,
+                        child: Row(
+                          children: [
+                            ProductPhoto(entry.key, size: 28),
+                            const SizedBox(width: 10),
+                            Text(entry.value),
+                          ],
+                        ),
+                      ),
+                    const PopupMenuItem(value: '', child: Text('Bỏ ảnh')),
+                  ],
+                  child: const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Text('Chọn ảnh minh họa ▾'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        field(
+          'imageUrl',
+          'Ảnh sản phẩm',
+          help: 'Dán đường dẫn HTTPS hoặc chọn ảnh minh họa có sẵn.',
+        ),
         field('minimumStock', 'Tồn tối thiểu theo đơn vị gốc'),
         DropdownButtonFormField<String>(
           initialValue: tracking,

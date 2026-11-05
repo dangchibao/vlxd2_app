@@ -1,3 +1,12 @@
+# Cập nhật 0.4.2 — Ảnh và danh mục mẫu
+
+- Màn đăng nhập dùng ảnh minh họa showroom và logo mái nhà. Logo đồng nhất với biểu tượng mở ứng dụng Windows, Android và PWA.
+- Danh mục mẫu lưu năm mã gạch, giá và tồn minh họa trong `assets/catalog/samples.json`. Các ảnh mẫu được tạo từ bốn bề mặt gạch trắng vân mây, xám vân đá, be vân đá và xám nhạt.
+- Danh mục hàng thật hiển thị ảnh trong bảng, thẻ và màn lập đơn. Người dùng chọn ảnh minh họa có sẵn hoặc đường dẫn HTTPS trong form hàng hóa. Các bản ghi minh họa được hiển thị ở trang riêng.
+- Analyze sạch. 82 kiểm thử unit/widget đạt, gồm ca tìm mã và chuyển bố cục danh mục mẫu giữa cửa sổ lớn và điện thoại.
+
+---
+
 # Cập nhật source 0.4 — 05/11/2026
 
 Đây là mốc kiểm chứng cho V1.0. Các mục sau đường phân cách là nhật ký lịch sử.

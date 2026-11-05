@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../data/app_runtime.dart';
 import '../data/database.dart';
 import 'business_pages.dart';
+import 'catalog_art.dart';
 
 String businessStatus(Object? value) => switch (value) {
   'posted' => 'Đã ghi sổ',
@@ -55,9 +56,10 @@ class RecordTable extends StatelessWidget {
   });
   List<(String, String)> get columns => switch (kind) {
     'catalog' => [
+      ('imageUrl', 'Hình ảnh'),
       ('sku', 'Mã hàng'),
       ('name', 'Tên hàng'),
-      ('group', 'Nhóm'),
+      ('model', 'Quy cách'),
       ('unit', 'ĐVT'),
       ('price', 'Giá bán'),
     ],
@@ -120,6 +122,7 @@ class RecordTable extends StatelessWidget {
   };
   Widget cell(BusinessRecord row, Map<String, dynamic> data, String key) {
     final value = data[key];
+    if (key == 'imageUrl') return ProductPhoto(value, size: 40);
     if (key == 'productId' && value is String) {
       final db = runtime.db;
       return FutureBuilder(

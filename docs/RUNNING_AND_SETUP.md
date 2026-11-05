@@ -55,13 +55,13 @@ trạm hoặc cờ đổi mật khẩu qua màn hình này.
 
 ## Chạy ứng dụng
 
-Các bản 0.4 nằm trong thư mục `dist`.
+Các bản 0.4.2 nằm trong thư mục `dist`.
 
-- Windows: giải nén `VLXD-Bay-Hai-Windows-0.4.zip` rồi mở
+- Windows: giải nén `VLXD-Bay-Hai-Windows-0.4.2.zip` rồi mở
   `app/vlxd_bay_hai.exe`. Giữ các DLL và thư mục `data` cạnh file chạy.
-- Android: `VLXD-Bay-Hai-Android-0.4.apk` có chữ ký debug dành cho cài thử
+- Android: `VLXD-Bay-Hai-Android-0.4.2.apk` có chữ ký debug dành cho cài thử
   ngoài Play Store. Hỗ trợ Android API 24 trở lên.
-- iPhone: giải nén `VLXD-Bay-Hai-PWA-0.4.zip` lên máy chủ tĩnh HTTPS, rồi
+- iPhone: giải nén `VLXD-Bay-Hai-PWA-0.4.2.zip` lên máy chủ tĩnh HTTPS, rồi
   thêm vào màn hình chính từ Safari theo mục PWA bên dưới.
 
 Để chạy từ mã nguồn:
@@ -86,6 +86,17 @@ coi đó là tồn kho hoặc công nợ đã xác nhận.
 Quyền offline từ phiên đã xác minh có hiệu lực tối đa 12 giờ. Không có quyền
 đăng nhập lần đầu khi chưa từng xác minh online. Những giao dịch chờ luôn được
 kiểm lại quyền hiện hành, version, giá, tồn và idempotency khi xác nhận.
+
+## Danh mục mẫu và ảnh hàng hóa
+
+Chọn **Xem danh mục mẫu** ở màn đăng nhập hoặc **Danh mục mẫu** trong Hàng
+hóa. Năm mã gạch cùng ảnh, giá và tồn minh họa nằm trong gói ứng dụng và xem
+được ngoại tuyến. Giá và tồn thực tế lấy từ chứng từ của cửa hàng.
+
+Khi thêm hoặc sửa hàng hóa, chọn ảnh minh họa có sẵn hoặc dán liên kết HTTPS
+của ảnh sản phẩm. Sau khi giao dịch được xác nhận, ảnh hiện trong danh sách
+hàng và ở phần chọn sản phẩm khi lập đơn. Ảnh tích hợp dùng được ngoại tuyến.
+Ảnh qua liên kết HTTPS cần nguồn ảnh truy cập được trên thiết bị đang dùng.
 
 ## Thao tác chính
 

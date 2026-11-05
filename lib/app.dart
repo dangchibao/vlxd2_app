@@ -10,6 +10,8 @@ import 'package:uuid/uuid.dart';
 import 'data/database.dart';
 import 'data/app_runtime.dart';
 import 'features/login_gate.dart';
+import 'features/brand_mark.dart';
+import 'features/catalog_art.dart';
 import 'features/business_pages.dart';
 import 'features/reports_search.dart';
 import 'features/data_tools.dart';
@@ -245,11 +247,26 @@ class _WorkspaceState extends ConsumerState<Workspace> {
       appBar: AppBar(
         backgroundColor: const Color(0xff0055d9),
         foregroundColor: Colors.white,
-        title: const Text(
-          'VLXD Bảy Hải',
-          style: TextStyle(fontWeight: FontWeight.bold),
+        title: const Row(
+          children: [
+            BrandMark(size: 30, roofColor: Colors.white),
+            SizedBox(width: 10),
+            Flexible(
+              child: Text(
+                'VLXD Bảy Hải',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
         ),
         actions: [
+          if (runtime == null)
+            IconButton(
+              onPressed: () => SampleCatalog.open(context),
+              icon: const Icon(Icons.grid_view_outlined),
+              tooltip: 'Xem danh mục mẫu',
+            ),
           if (runtime != null) ...[
             IconButton(
               tooltip: 'Đồng bộ',

@@ -1,0 +1,47 @@
+[
+  {
+    "sku": "PR0606TR",
+    "name": "Prime trắng vân mây",
+    "model": "60 × 60 cm",
+    "unit": "m²",
+    "price": 235000,
+    "stock": "202,40",
+    "imageUrl": "asset:tile-white"
+  },
+  {
+    "sku": "PR0606VD",
+    "name": "Prime vân đá",
+    "model": "60 × 60 cm",
+    "unit": "m²",
+    "price": 240000,
+    "stock": "518,40",
+    "imageUrl": "asset:tile-stone"
+  },
+  {
+    "sku": "PR0606BE",
+    "name": "Prime be vân đá",
+    "model": "60 × 60 cm",
+    "unit": "m²",
+    "price": 238000,
+    "stock": "288,00",
+    "imageUrl": "asset:tile-beige"
+  },
+  {
+    "sku": "VC6060XM",
+    "name": "Viglacera xám nhạt",
+    "model": "60 × 60 cm",
+    "unit": "m²",
+    "price": 225000,
+    "stock": "360,00",
+    "imageUrl": "asset:tile-gray"
+  },
+  {
+    "sku": "PR0808VD",
+    "name": "Prime trắng vân đá",
+    "model": "80 × 80 cm",
+    "unit": "m²",
+    "price": 270000,
+    "stock": "172,80",
+    "imageUrl": "asset:tile-white"
+  }
+]

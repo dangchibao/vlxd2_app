@@ -15,6 +15,7 @@ import 'shift_close.dart';
 import 'delivery_map.dart';
 import 'invoice_preparation.dart';
 import 'record_table.dart';
+import 'catalog_art.dart';
 
 String vnd(int value) => '${NumberFormat.decimalPattern('vi').format(value)} đ';
 String qty(int value) => NumberFormat('0.###', 'vi').format(value / 1000);
@@ -903,6 +904,10 @@ class _OrderComposerState extends State<OrderComposer> {
                       .take(8)
                       .map(
                         (p) => ListTile(
+                          leading: ProductPhoto(
+                            catalog[p.id]?['imageUrl'],
+                            size: 36,
+                          ),
                           title: Text(p.name),
                           subtitle: Text(
                             '${p.sku} • ${vnd(p.price)} / ${p.unit}',

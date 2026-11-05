@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../data/app_runtime.dart';
 import '../domain/operations.dart';
+import 'brand_mark.dart';
+import 'catalog_art.dart';
 
 class LoginGate extends StatefulWidget {
   final AppRuntime runtime;
@@ -74,47 +76,38 @@ class _LoginGateState extends State<LoginGate> {
                     children: [
                       if (size.maxWidth > 650)
                         Expanded(
-                          child: Container(
-                            height: 480,
-                            color: const Color(0xff0055d9),
-                            padding: const EdgeInsets.all(32),
-                            child: const Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Icon(
-                                  Icons.storefront,
-                                  size: 72,
-                                  color: Colors.white,
-                                ),
-                                SizedBox(height: 24),
-                                Text(
-                                  'VLXD Bảy Hải',
-                                  style: TextStyle(
-                                    fontSize: 32,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                SizedBox(height: 16),
-                                Text(
-                                  'Quản lý hàng hóa, kho và bán hàng\nDữ liệu cục bộ • Đồng bộ có xác nhận',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 16,
-                                  ),
-                                ),
-                              ],
-                            ),
+                          flex: 11,
+                          child: Image.asset(
+                            '$catalogArt/showroom.jpg',
+                            height: change ? 575 : 485,
+                            fit: BoxFit.cover,
+                            semanticLabel:
+                                'Ảnh minh họa showroom vật liệu xây dựng',
                           ),
                         ),
                       Expanded(
+                        flex: 10,
                         child: Padding(
                           padding: const EdgeInsets.all(28),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
+                              const Center(child: BrandMark()),
+                              const Text(
+                                'VLXD Bảy Hải',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Color(0xff082956),
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const Text(
+                                'Gò Dầu · Tây Ninh',
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 20),
                               Text(
                                 change ? 'Đổi mật khẩu lần đầu' : 'Đăng nhập',
                                 style: const TextStyle(
@@ -208,6 +201,12 @@ class _LoginGateState extends State<LoginGate> {
                                   child: const Text(
                                     'Kiểm tra trạng thái kích hoạt',
                                   ),
+                                ),
+                              if (!change)
+                                TextButton.icon(
+                                  onPressed: () => SampleCatalog.open(context),
+                                  icon: const Icon(Icons.grid_view_outlined),
+                                  label: const Text('Xem danh mục mẫu'),
                                 ),
                               if (change)
                                 TextButton(
