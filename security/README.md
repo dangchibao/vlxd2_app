@@ -21,7 +21,8 @@ chỉ khi chạy script trên cùng.
 
 Rules giới hạn ai được ghi canonical; trạm Windows là thành phần được tin cậy,
 không coi Rules là nơi tự tính giá vốn/kế toán. Có công cụ quản trị owner ở tools/manage-store.cjs; Auth/session đã nối UI.
-Project mới đang chờ bật Auth. Chưa deploy Hosting production.
+Email/Password và Firestore Rules đã hoạt động trên project mới
+`vlxd-bayhai-v1-261105`. Hosting production chưa được triển khai.
 
 Package override grpc-js 1.14.7 xử lý advisory của phụ thuộc SDK kiểm thử;
 `npm audit` sau cài đặt không còn báo lỗ hổng tại thời điểm kiểm tra. Không dùng

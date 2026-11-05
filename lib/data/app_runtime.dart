@@ -59,6 +59,7 @@ class AppRuntime extends ChangeNotifier {
   final AppDatabase Function(String uid)? databaseFactory;
   final Map<String, AppDatabase> _userDatabases = {};
   int _generation = 0;
+  Future<void> _vaultWrites = Future.value();
   final AppConnection config;
   late final http.Client client;
   late final FirebaseAuthRest auth;
@@ -108,10 +109,13 @@ class AppRuntime extends ChangeNotifier {
 
   Future<void> restore() async {
     if (!config.configured) return;
+    final generation = _generation;
     loading = true;
     _notify();
     try {
-      session = await vault.read();
+      final stored = await vault.read();
+      if (generation != _generation) return;
+      session = stored;
       if (session != null) {
         try {
           await currentSession();
@@ -124,14 +128,17 @@ class AppRuntime extends ChangeNotifier {
           await _restoreOffline();
         }
       }
-      stationSession = await stationVault.read();
+      final storedStation = await stationVault.read();
+      if (generation != _generation) return;
+      stationSession = storedStation;
       if (actor != null && !actor!.mustChangePassword) _start();
     } catch (_) {
+      if (generation != _generation) return;
       session = null;
       actor = null;
       error = 'Không khôi phục được phiên. Vui lòng đăng nhập lại.';
     } finally {
-      loading = false;
+      if (generation == _generation) loading = false;
       _notify();
     }
   }
@@ -163,14 +170,18 @@ class AppRuntime extends ChangeNotifier {
   }
 
   Future<AuthSession> currentSession() async {
+    final generation = _generation;
     var value = session;
     if (value == null) throw const AuthFailure('Vui lòng đăng nhập.');
     if (value.expiresAt.isBefore(
       DateTime.now().toUtc().add(const Duration(minutes: 1)),
     )) {
       value = await auth.refresh(value);
+      if (generation != _generation || session?.uid != value.uid) {
+        throw const AuthFailure('Phiên đăng nhập đã thay đổi.');
+      }
       session = value;
-      await vault.write(value);
+      await _persist(() => vault.write(value!));
     }
     return value;
   }
@@ -197,47 +208,58 @@ class AppRuntime extends ChangeNotifier {
       role,
       mustChangePassword: data['mustChangePassword'] != false,
     );
-    await vault.writeData('profile', {
+    final profile = <String, dynamic>{
       'uid': current.uid,
       'role': role.name,
       'active': true,
       'mustChangePassword': actor!.mustChangePassword,
       'verifiedAt': DateTime.now().toUtc().toIso8601String(),
-    });
+    };
+    await _persist(() => vault.writeData('profile', profile));
     offline = false;
     _membershipChecked = DateTime.now();
   }
 
   Future<void> signIn(String username, String password) async {
-    _generation++;
+    final generation = ++_generation;
     loading = true;
     error = null;
     _notify();
     try {
-      session = await auth.signIn(config.emailFor(username), password);
+      final candidate = await auth.signIn(config.emailFor(username), password);
+      if (generation != _generation) return;
+      session = candidate;
       await _membership();
-      await vault.write(session!);
+      if (generation != _generation) return;
+      await _persist(() => vault.write(candidate));
       if (!actor!.mustChangePassword) _start();
     } catch (e) {
+      if (generation != _generation) return;
       session = null;
       actor = null;
+      await _persist(vault.clear);
       error = e is AuthFailure
           ? e.message
           : 'Không đăng nhập được. Kiểm tra kết nối và cấu hình cửa hàng.';
     } finally {
-      loading = false;
+      if (generation == _generation) loading = false;
       _notify();
     }
   }
 
   Future<void> changePassword(String password) async {
-    _generation++;
+    final generation = ++_generation;
     loading = true;
     error = null;
     _notify();
     try {
-      session = await auth.changePassword(await currentSession(), password);
-      await vault.write(session!);
+      final candidate = await auth.changePassword(
+        await currentSession(),
+        password,
+      );
+      if (generation != _generation) return;
+      session = candidate;
+      await _persist(() => vault.write(candidate));
       await _membership();
       if (actor?.mustChangePassword == true) {
         error = 'Mật khẩu đã đổi. Quản trị cần xác nhận kích hoạt tài khoản.';
@@ -245,9 +267,10 @@ class AppRuntime extends ChangeNotifier {
         _start();
       }
     } catch (e) {
+      if (generation != _generation) return;
       error = e is AuthFailure ? e.message : 'Không đổi được mật khẩu.';
     } finally {
-      loading = false;
+      if (generation == _generation) loading = false;
       _notify();
     }
   }
@@ -268,7 +291,7 @@ class AppRuntime extends ChangeNotifier {
     _timer?.cancel();
     session = null;
     actor = null;
-    await vault.clear();
+    await _persist(vault.clear);
     error = null;
     _notify();
   }
@@ -291,6 +314,15 @@ class AppRuntime extends ChangeNotifier {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 30), (_) => tick());
     unawaited(tick());
+  }
+
+  Future<void> _persist(Future<void> Function() work) {
+    final generation = _generation;
+    final next = _vaultWrites.catchError((Object _) {}).then((_) async {
+      if (generation == _generation) await work();
+    });
+    _vaultWrites = next;
+    return next;
   }
 
   Future<String> enqueue(
@@ -347,7 +379,17 @@ class AppRuntime extends ChangeNotifier {
       }
       await sync.pump(actor!.uid);
       if (generation != _generation) return;
-      if (stationSession != null) await _processStation();
+      if (stationSession != null) {
+        try {
+          await _processStation();
+        } on AuthFailure {
+          await disconnectStation();
+          throw const BusinessException(
+            'station_auth',
+            'Phiên trạm hết hiệu lực. Kết nối lại tài khoản trạm tại mục Đồng bộ.',
+          );
+        }
+      }
       await pull();
       offline = false;
       lastSync = DateTime.now();
@@ -450,6 +492,9 @@ class AppRuntime extends ChangeNotifier {
   }
 
   Future<void> connectStation(String email, String password) async {
+    if (!{StaffRole.admin, StaffRole.manager}.contains(actor?.role)) {
+      throw const AuthFailure('Chỉ quản lý được kết nối tài khoản trạm.');
+    }
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.windows) {
       throw const AuthFailure('Trạm xác nhận chỉ chạy trên Windows.');
     }
@@ -482,6 +527,9 @@ class AppRuntime extends ChangeNotifier {
       DateTime.now().toUtc().add(const Duration(minutes: 1)),
     )) {
       value = await auth.refresh(value);
+      if (stationSession?.uid != value.uid) {
+        throw const AuthFailure('Phiên trạm đã thay đổi.');
+      }
       stationSession = value;
       await stationVault.write(value);
     }
@@ -552,13 +600,99 @@ class AppRuntime extends ChangeNotifier {
     await tick();
   }
 
+  Future<Draft> recoverRejected(String commandId) async {
+    final user = actor;
+    if (user == null) throw const AuthFailure('Cần đăng nhập.');
+    final row = await (db.select(
+      db.outbox,
+    )..where((r) => r.id.equals(commandId))).getSingleOrNull();
+    if (row == null ||
+        row.actorUid != user.uid ||
+        !{'error', 'conflict'}.contains(row.status) ||
+        !{'sale', 'purchase', 'quote', 'reservation'}.contains(row.operation)) {
+      throw const BusinessException(
+        'recovery',
+        'Không thể tạo bản sao từ lệnh này.',
+      );
+    }
+    final receipt = await sync.transport.receipt(commandId);
+    if (actor?.uid != user.uid) {
+      throw const AuthFailure('Phiên đăng nhập đã thay đổi.');
+    }
+    if (receipt == null || !{'error', 'conflict'}.contains(receipt.status)) {
+      throw const BusinessException(
+        'recovery',
+        'Chưa có xác nhận từ chối trên máy chủ hoặc lệnh đã ghi sổ. Đồng bộ và đối chiếu trước, không tạo bản sao.',
+      );
+    }
+    final operation = Operation.values.firstWhere(
+      (o) => o.name == row.operation,
+    );
+    user.require(operation);
+    final source = jsonDecode(row.payload) as Map<String, dynamic>;
+    final id = const Uuid().v4();
+    String quantityText(int value) {
+      final fraction = (value % 1000)
+          .toString()
+          .padLeft(3, '0')
+          .replaceFirst(RegExp(r'0+$'), '');
+      return '${value ~/ 1000}${fraction.isEmpty ? '' : ',$fraction'}';
+    }
+
+    await db.saveDraft(id, {
+      'kind': operation == Operation.purchase
+          ? 'purchase'
+          : operation == Operation.quote
+          ? 'quote'
+          : 'sale',
+      'warehouse': source['warehouse'] ?? 'main',
+      'party':
+          source[operation == Operation.purchase ? 'supplierId' : 'customerId'],
+      'discount': '${source['discount'] ?? 0}',
+      'surcharge': '${source['surcharge'] ?? 0}',
+      'dueDate':
+          source[operation == Operation.purchase ? 'expectedAt' : 'dueAt'] ??
+          '',
+      'reserveOrder':
+          operation == Operation.reservation ||
+          receipt.result['code'] == 'oversell',
+      'recoveredFrom': commandId,
+      'items': [
+        for (final line in source['lines'] as List)
+          {
+            'productId': line['productId'],
+            'quantity': quantityText(
+              (line['saleQuantity'] ?? line['quantity']) as int,
+            ),
+            'saleUnit': line['saleUnit'],
+            'cost': '${line['unitCost'] ?? 0}',
+            'trackingInput':
+                line['lotId'] ?? (line['serials'] as List? ?? []).join(', '),
+          },
+      ],
+    }, createOutbox: false);
+    return (db.select(db.drafts)..where((r) => r.id.equals(id))).getSingle();
+  }
+
   Stream<List<BusinessRecord>> records(
     String kind, {
     int offset = 0,
     int limit = 100,
+    String search = '',
+    String? recordId,
   }) =>
       (db.select(db.businessRecords)
             ..where((r) => r.kind.equals(kind))
+            ..where(
+              (r) => search.isEmpty
+                  ? const Constant(true)
+                  : r.payload.contains(search),
+            )
+            ..where(
+              (r) => recordId == null
+                  ? const Constant(true)
+                  : r.id.equals('$kind:$recordId'),
+            )
             ..orderBy([(r) => OrderingTerm.asc(r.id)])
             ..limit(limit, offset: offset))
           .watch();

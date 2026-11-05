@@ -22,8 +22,13 @@ class BackupPreview {
 
 class BackupService {
   final AppDatabase db;
-  final String storeId, userId;
-  BackupService(this.db, {required this.storeId, required this.userId});
+  final String storeId, userId, projectId;
+  BackupService(
+    this.db, {
+    required this.storeId,
+    required this.userId,
+    this.projectId = '',
+  });
   Object? _encode(Object? value) =>
       value is Uint8List ? {'binary': base64Encode(value)} : value;
   Object? _decode(Object? value) {
@@ -58,6 +63,7 @@ class BackupService {
       'schema': db.schemaVersion,
       'storeId': storeId,
       'userId': userId,
+      'projectId': projectId,
       'tables': tables,
     };
   });
@@ -138,6 +144,7 @@ class BackupService {
       throw const FormatException('Checksum bản sao không khớp.');
     }
     if (snapshot['schema'] != db.schemaVersion ||
+        (snapshot['projectId'] ?? '') != projectId ||
         snapshot['storeId'] != storeId ||
         snapshot['userId'] != userId) {
       throw const FormatException(

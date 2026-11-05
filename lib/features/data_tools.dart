@@ -268,6 +268,7 @@ class _DataToolsPageState extends State<DataToolsPage> {
   BackupService get backup => BackupService(
     widget.runtime.db,
     storeId: widget.runtime.config.storeId,
+    projectId: widget.runtime.config.projectId,
     userId: widget.runtime.actor!.uid,
   );
   Future<void> createBackup() async {

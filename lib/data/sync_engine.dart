@@ -216,7 +216,9 @@ class SyncEngine {
                 db.commandReceipts,
               )..where((r) => r.id.equals(row.id))).getSingleOrNull();
               if (previous != null &&
-                  (previous.fingerprint != command.fingerprint(actorUid) ||
+                  ((previous.fingerprint != command.fingerprint(actorUid) &&
+                          previous.fingerprint !=
+                              command.legacyFingerprint(actorUid)) ||
                       canonicalJson(
                             jsonDecode(previous.result) as Map<String, dynamic>,
                           ) !=
@@ -244,7 +246,9 @@ class SyncEngine {
               resolved.status,
               error: resolved.status == 'confirmed'
                   ? null
-                  : resolved.result['code'] as String? ?? 'review_required',
+                  : resolved.result['message'] as String? ??
+                        resolved.result['code'] as String? ??
+                        'Cần đối chiếu chứng từ.',
             );
           });
         } on FirestoreFailure catch (e) {

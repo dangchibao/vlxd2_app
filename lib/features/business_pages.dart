@@ -14,6 +14,7 @@ import 'business_receipt.dart';
 import 'shift_close.dart';
 import 'delivery_map.dart';
 import 'invoice_preparation.dart';
+import 'record_table.dart';
 
 String vnd(int value) => '${NumberFormat.decimalPattern('vi').format(value)} đ';
 String qty(int value) => NumberFormat('0.###', 'vi').format(value / 1000);
@@ -55,6 +56,7 @@ void feedback(BuildContext context, String text) {
 class RecordList extends StatefulWidget {
   final AppRuntime runtime;
   final String kind, title;
+  final String? onlyId;
   final List<Widget> actions;
   final Widget Function(BuildContext, BusinessRecord, Map<String, dynamic>)
   item;
@@ -65,6 +67,7 @@ class RecordList extends StatefulWidget {
     required this.title,
     required this.item,
     this.actions = const [],
+    this.onlyId,
   });
   @override
   State<RecordList> createState() => _RecordListState();
@@ -72,6 +75,8 @@ class RecordList extends StatefulWidget {
 
 class _RecordListState extends State<RecordList> {
   int page = 0;
+  String search = '';
+  Timer? searchTimer;
   late Stream<List<BusinessRecord>> stream;
   @override
   void initState() {
@@ -82,7 +87,9 @@ class _RecordListState extends State<RecordList> {
   @override
   void didUpdateWidget(RecordList old) {
     super.didUpdateWidget(old);
-    if (old.kind != widget.kind || old.runtime != widget.runtime) {
+    if (old.kind != widget.kind ||
+        old.runtime != widget.runtime ||
+        old.onlyId != widget.onlyId) {
       page = 0;
       refresh();
     }
@@ -93,7 +100,15 @@ class _RecordListState extends State<RecordList> {
       widget.kind,
       offset: page * 100,
       limit: 101,
+      search: search,
+      recordId: widget.onlyId,
     );
+  }
+
+  @override
+  void dispose() {
+    searchTimer?.cancel();
+    super.dispose();
   }
 
   void move(int next) {
@@ -121,6 +136,30 @@ class _RecordListState extends State<RecordList> {
         ],
       ),
       const SizedBox(height: 16),
+      if (widget.onlyId == null) ...[
+        SizedBox(
+          width: 420,
+          child: TextField(
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search),
+              hintText: 'Tìm mã, tên, điện thoại hoặc chứng từ…',
+            ),
+            onChanged: (value) {
+              searchTimer?.cancel();
+              searchTimer = Timer(const Duration(milliseconds: 180), () {
+                if (mounted) {
+                  setState(() {
+                    search = value.trim();
+                    page = 0;
+                    refresh();
+                  });
+                }
+              });
+            },
+          ),
+        ),
+        const SizedBox(height: 12),
+      ],
       Expanded(
         child: StreamBuilder(
           stream: stream,
@@ -142,13 +181,22 @@ class _RecordListState extends State<RecordList> {
             return Column(
               children: [
                 Expanded(
-                  child: ListView.builder(
-                    itemCount: rows.length > 100 ? 100 : rows.length,
-                    itemBuilder: (context, index) => widget.item(
-                      context,
-                      rows[index],
-                      recordData(rows[index]),
-                    ),
+                  child: LayoutBuilder(
+                    builder: (context, size) => size.maxWidth >= 850
+                        ? RecordTable(
+                            runtime: widget.runtime,
+                            kind: widget.kind,
+                            rows: rows.take(100).toList(),
+                            details: widget.item,
+                          )
+                        : ListView.builder(
+                            itemCount: rows.length > 100 ? 100 : rows.length,
+                            itemBuilder: (context, index) => widget.item(
+                              context,
+                              rows[index],
+                              recordData(rows[index]),
+                            ),
+                          ),
                   ),
                 ),
                 Row(
@@ -481,6 +529,22 @@ class _OrderComposerState extends State<OrderComposer> {
   final trackingInputs = <String, TextEditingController>{};
   final catalog = <String, Map<String, dynamic>>{};
   final selectedUnits = <String, String>{};
+  final physicalStock = <String, int>{}, heldStock = <String, int>{};
+  StreamSubscription<List<BusinessRecord>>? stockSubscription;
+  void stockChanged(List<BusinessRecord> rows) {
+    physicalStock.clear();
+    heldStock.clear();
+    for (final row in rows) {
+      final data = recordData(row);
+      final key = jsonEncode([data['warehouse'], data['productId']]);
+      if (row.kind == 'stock' && data['quality'] == 'good') {
+        physicalStock[key] = data['quantity'] as int;
+      }
+      if (row.kind == 'reservedStock') heldStock[key] = data['quantity'] as int;
+    }
+    if (mounted && !loading) setState(() {});
+  }
+
   String? party;
   String search = '', message = '';
   bool loading = true, busy = false;
@@ -501,6 +565,10 @@ class _OrderComposerState extends State<OrderComposer> {
   Future<void> load() async {
     try {
       final db = database;
+      final stockQuery = db.select(db.businessRecords)
+        ..where((r) => r.kind.isIn(['stock', 'reservedStock']));
+      stockChanged(await stockQuery.get());
+      stockSubscription = stockQuery.watch().listen(stockChanged);
       products = await db.select(db.products).get();
       for (final row in await (db.select(
         db.businessRecords,
@@ -558,6 +626,7 @@ class _OrderComposerState extends State<OrderComposer> {
   @override
   void dispose() {
     autosave?.cancel();
+    unawaited(stockSubscription?.cancel());
     if (!submitted && !loading) unawaited(saveDraft());
     for (final c in [
       ...quantities.values,
@@ -880,6 +949,7 @@ class _OrderComposerState extends State<OrderComposer> {
                                   products.firstWhere((p) => p.id == id).unit,
                                   ...(catalog[id]?['units'] as Map? ?? {}).keys
                                       .cast<String>(),
+                                  ?selectedUnits[id],
                                 })
                                   DropdownMenuItem(
                                     value: unit,
@@ -893,6 +963,7 @@ class _OrderComposerState extends State<OrderComposer> {
                                       changed();
                                     },
                             ),
+                          const SizedBox(height: 12),
                           Row(
                             children: [
                               Expanded(
@@ -958,6 +1029,34 @@ class _OrderComposerState extends State<OrderComposer> {
                                 }
                               },
                             ),
+                          Builder(
+                            builder: (context) {
+                              final key = jsonEncode([
+                                    warehouse.text.trim(),
+                                    id,
+                                  ]),
+                                  physical =
+                                      physicalStock[jsonEncode([
+                                        warehouse.text.trim(),
+                                        id,
+                                      ])] ??
+                                      0,
+                                  held =
+                                      heldStock[jsonEncode([
+                                        warehouse.text.trim(),
+                                        id,
+                                      ])] ??
+                                      0;
+                              return Text(
+                                'Tồn thực tế: ${qty(physical)} • Giữ chỗ: ${qty(heldStock[key] ?? 0)} • Khả dụng: ${qty(physical - held)} ${products.firstWhere((p) => p.id == id).unit}',
+                                style: TextStyle(
+                                  color: physical - held <= 0
+                                      ? Colors.orange.shade900
+                                      : Colors.green.shade800,
+                                ),
+                              );
+                            },
+                          ),
                           if (!widget.purchase &&
                               {'lot', 'serial'}.contains(trackingModes[id]))
                             TextField(
@@ -1249,7 +1348,13 @@ Future<void> lineAction(
 class TradingPage extends StatelessWidget {
   final AppRuntime runtime;
   final bool purchase;
-  const TradingPage({super.key, required this.runtime, this.purchase = false});
+  final String? onlyId;
+  const TradingPage({
+    super.key,
+    required this.runtime,
+    this.purchase = false,
+    this.onlyId,
+  });
   Future<void> assign(
     BuildContext context,
     BusinessRecord row,
@@ -1364,6 +1469,7 @@ class TradingPage extends StatelessWidget {
   Widget build(BuildContext context) => RecordList(
     runtime: runtime,
     kind: purchase ? 'purchase' : 'sale',
+    onlyId: onlyId,
     title: purchase ? 'Đơn mua nhà cung cấp' : 'Đơn bán đã ghi sổ',
     actions: [
       if (allowed(runtime, purchase ? Operation.purchase : Operation.sale))
@@ -1818,7 +1924,7 @@ class FinancePage extends StatelessWidget {
   const FinancePage({super.key, required this.runtime});
   @override
   Widget build(BuildContext context) => DefaultTabController(
-    length: 4,
+    length: 5,
     child: Column(
       children: [
         Wrap(
@@ -1860,6 +1966,7 @@ class FinancePage extends StatelessWidget {
             Tab(text: 'Nợ nhà cung cấp'),
             Tab(text: 'Chi phí'),
             Tab(text: 'Ca đã chốt'),
+            Tab(text: 'Tiền đặt cọc'),
           ],
         ),
         const SizedBox(height: 12),
@@ -1871,6 +1978,7 @@ class FinancePage extends StatelessWidget {
                 'payable',
                 'expense',
                 'shiftClose',
+                'customerDeposit',
               ])
                 RecordList(
                   runtime: runtime,
@@ -1879,7 +1987,9 @@ class FinancePage extends StatelessWidget {
                   item: (context, row, data) => Card(
                     child: ListTile(
                       title: Text(
-                        kind == 'receivable' || kind == 'payable'
+                        kind == 'receivable' ||
+                                kind == 'payable' ||
+                                kind == 'customerDeposit'
                             ? row.id.split(':').skip(1).join(':')
                             : data['reason'] as String? ??
                                   data['shiftId'] as String? ??
@@ -2006,6 +2116,37 @@ class _ConnectionPageState extends State<ConnectionPage> {
   final email = TextEditingController(), password = TextEditingController();
   bool busy = false;
   String? error;
+  Future<void> recover(OutboxData row) async {
+    try {
+      final draft = await widget.runtime.recoverRejected(row.id);
+      if (!mounted) return;
+      feedback(
+        context,
+        'Đã tạo nháp mới từ lệnh bị từ chối. Kiểm tra giá, tồn và đối chiếu đơn gốc trước khi gửi.',
+      );
+      await Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => OrderComposer(
+            runtime: widget.runtime,
+            draft: draft,
+            purchase: row.operation == 'purchase',
+            quote: row.operation == 'quote',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        feedback(
+          context,
+          e is BusinessException
+              ? e.message
+              : 'Cần kết nối mạng để xác minh từ chối trước khi khôi phục.',
+        );
+      }
+    }
+  }
+
   @override
   void dispose() {
     email.dispose();
@@ -2104,6 +2245,17 @@ class _ConnectionPageState extends State<ConnectionPage> {
                       subtitle: Text(
                         '${item.status} • ${item.lastError ?? ''}',
                       ),
+                      onTap:
+                          item.actorUid == r.actor?.uid &&
+                              {'error', 'conflict'}.contains(item.status) &&
+                              {
+                                'sale',
+                                'purchase',
+                                'quote',
+                                'reservation',
+                              }.contains(item.operation)
+                          ? () => recover(item)
+                          : null,
                       trailing:
                           item.status == 'error' &&
                               item.actorUid == r.actor?.uid

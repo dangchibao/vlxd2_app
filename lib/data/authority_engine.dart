@@ -32,7 +32,9 @@ class AuthorityEngine {
     final fingerprint = command.fingerprint(verifiedActor.uid);
     final existing = await store.receipt(command.id);
     if (existing != null) {
-      if (existing.fingerprint != fingerprint) {
+      if (existing.fingerprint != fingerprint &&
+          existing.fingerprint !=
+              command.legacyFingerprint(verifiedActor.uid)) {
         throw const BusinessException(
           'idempotency',
           'Mã giao dịch đã dùng với nội dung khác.',
@@ -43,6 +45,7 @@ class AuthorityEngine {
     final payload =
         jsonDecode(canonicalJson(command.payload)) as Map<String, dynamic>;
     final kind = switch (command.operation) {
+      Operation.deposit || Operation.reservationRefund => 'reservation',
       Operation.printResult || Operation.printClaim => 'printRequest',
       Operation.approveReservation ||
       Operation.cancelReservation ||
@@ -147,6 +150,7 @@ class AuthorityEngine {
     final keys = <String>{};
     for (final line in result) {
       final id = textField(line, 'productId');
+      line['productId'] = id;
       if (!keys.add(id)) {
         throw const BusinessException(
           'validation',
@@ -172,26 +176,86 @@ class AuthorityEngine {
     int value, {
     String quality = 'good',
   }) async {
-    final id = _stockId(warehouse, product, quality);
-    final current = await read('stock', id);
-    final nextQuantity = (current['quantity'] as int? ?? 0) + quantity;
-    final nextValue = (current['value'] as int? ?? 0) + value;
-    if (nextQuantity < 0 ||
-        nextValue < 0 ||
-        nextValue > 9000000000000 ||
-        (nextQuantity == 0 && nextValue != 0)) {
+    const qualities = ['good', 'quarantine', 'damaged'];
+    if (!qualities.contains(quality)) {
+      throw const BusinessException('stock', 'Chất lượng tồn không hợp lệ.');
+    }
+    final positions = <String, Map<String, dynamic>>{};
+    var totalQuantity = quantity, totalValue = value;
+    for (final state in qualities) {
+      final current = await stock(warehouse, product, quality: state);
+      positions[state] = current;
+      totalQuantity += current['quantity'] as int? ?? 0;
+      totalValue += current['value'] as int? ?? 0;
+    }
+    final changedQuantity =
+        (positions[quality]!['quantity'] as int? ?? 0) + quantity;
+    if (changedQuantity < 0 ||
+        totalQuantity < 0 ||
+        totalQuantity > 9000000000000 ||
+        totalValue < 0 ||
+        totalValue > 9000000000000 ||
+        (totalQuantity == 0 && totalValue != 0)) {
       throw const BusinessException(
         'stock',
         'Không đủ tồn hợp lệ hoặc giá trị tồn không cân đối.',
       );
     }
-    await _write('stock', id, {
-      'warehouse': warehouse,
-      'productId': product,
-      'quality': quality,
-      'quantity': nextQuantity,
-      'value': nextValue,
-    });
+    final information = await store.product(product);
+    var cumulativeQuantity = 0, allocatedValue = 0;
+    // One weighted average per product/warehouse. Quality affects availability,
+    // never creates a separate costing pool. Values sum exactly after rounding.
+    for (final state in qualities) {
+      final previous = positions[state]!;
+      final q = state == quality
+          ? changedQuantity
+          : previous['quantity'] as int? ?? 0;
+      cumulativeQuantity += q;
+      final cumulativeValue = totalQuantity == 0
+          ? 0
+          : roundedRatio(totalValue, cumulativeQuantity, totalQuantity);
+      final positionValue = cumulativeValue - allocatedValue;
+      allocatedValue = cumulativeValue;
+      if (previous.isEmpty && q == 0) continue;
+      if (previous['quantity'] == q &&
+          previous['value'] == positionValue &&
+          previous['name'] == information?.name &&
+          previous['unit'] == information?.unit) {
+        continue;
+      }
+      await _write('stock', _stockId(warehouse, product, state), {
+        'name': information?.name ?? product,
+        'sku': information?.sku ?? '',
+        'unit': information?.unit ?? '',
+        'warehouse': warehouse,
+        'productId': product,
+        'quality': state,
+        'quantity': q,
+        'value': positionValue,
+      });
+    }
+  }
+
+  Future<({int quantity, int value})> _valuation(
+    String warehouse,
+    String product,
+  ) async {
+    var quantity = 0, value = 0;
+    for (final quality in ['good', 'quarantine', 'damaged']) {
+      final current = await stock(warehouse, product, quality: quality);
+      quantity += current['quantity'] as int? ?? 0;
+      value += current['value'] as int? ?? 0;
+    }
+    return (quantity: quantity, value: value);
+  }
+
+  Future<int> _issueValue(
+    String warehouse,
+    String product,
+    int quantity,
+  ) async {
+    final totals = await _valuation(warehouse, product);
+    return roundedRatio(totals.value, quantity, totals.quantity);
   }
 
   Future<int> _issue(String warehouse, String product, int quantity) async {
@@ -210,7 +274,7 @@ class AuthorityEngine {
         'Vượt tồn bán được. Cần quản lý duyệt đơn chờ nhập hoặc giao phần có sẵn.',
       );
     }
-    final value = roundedRatio(current['value'] as int, quantity, available);
+    final value = await _issueValue(warehouse, product, quantity);
     await _stockChange(warehouse, product, -quantity, -value);
     return value;
   }
@@ -224,6 +288,65 @@ class AuthorityEngine {
     Map<String, dynamic>? quoteSnapshot,
   }) async {
     switch (op) {
+      case Operation.deposit:
+        if (old.isEmpty ||
+            !{'reserved', 'waiting', 'partial'}.contains(old['status'])) {
+          throw const BusinessException(
+            'deposit',
+            'Chỉ thu cọc cho đơn giữ hàng hoặc đơn chờ đã được duyệt.',
+          );
+        }
+        final amount = integerField(p, 'amount', min: 1),
+            paid = old['depositPaid'] as int? ?? 0;
+        if (amount > (old['total'] as int) - paid) {
+          throw const BusinessException(
+            'overpayment',
+            'Thu cọc vượt giá trị đơn.',
+          );
+        }
+        await _openShift(p, sign: 1);
+        await _depositChange(old['customerId'] as String, amount);
+        await _write('deposit', '$id:${old['version']}', {
+          ...p,
+          'reservationId': id,
+          'customerId': old['customerId'],
+          'customerName': (await read(
+            'party',
+            old['customerId'] as String,
+          ))['name'],
+          'createdAt': DateTime.now().toUtc().toIso8601String(),
+        });
+        return {...old, 'depositPaid': paid + amount};
+      case Operation.reservationRefund:
+        if (old.isEmpty ||
+            !{'cancelled', 'converted'}.contains(old['status'])) {
+          throw const BusinessException(
+            'deposit',
+            'Chỉ hoàn cọc dư của đơn đã hủy hoặc đã chuyển bán.',
+          );
+        }
+        final due = old['depositRefundDue'] as int? ?? 0,
+            amount = integerField(p, 'amount', min: 1);
+        if (amount > due) {
+          throw const BusinessException(
+            'overpayment',
+            'Hoàn vượt tiền cọc còn lại.',
+          );
+        }
+        textField(p, 'reason');
+        await _openShift(p);
+        await _depositChange(old['customerId'] as String, -amount);
+        await _write('reservationRefund', '$id:${old['version']}', {
+          ...p,
+          'reservationId': id,
+          'customerId': old['customerId'],
+          'createdAt': DateTime.now().toUtc().toIso8601String(),
+        });
+        return {
+          ...old,
+          'depositRefundDue': due - amount,
+          'depositRefunded': (old['depositRefunded'] as int? ?? 0) + amount,
+        };
       case Operation.settings:
         if (id != 'store') {
           throw const BusinessException(
@@ -251,6 +374,8 @@ class AuthorityEngine {
           'payment',
           'supplierPayment',
           'refund',
+          'deposit',
+          'reservationRefund',
           'purchaseReceipt',
           'transfer',
           'returnReceipt',
@@ -408,10 +533,11 @@ class AuthorityEngine {
             'Tồn thực đếm thấp hơn hàng đã giữ. Hủy hoặc xử lý đơn giữ trước.',
           );
         }
+        final valuation = await _valuation(warehouse, product);
         final value = delta < 0
-            ? -roundedRatio(current['value'] as int, -delta, physical)
-            : physical > 0
-            ? roundedRatio(current['value'] as int, delta, physical)
+            ? -await _issueValue(warehouse, product, -delta)
+            : valuation.quantity > 0
+            ? roundedRatio(valuation.value, delta, valuation.quantity)
             : roundedRatio(integerField(p, 'unitCost'), delta, 1000);
         if (await store.product(product) == null) {
           throw const BusinessException('missing', 'Hàng hóa không tồn tại.');
@@ -475,10 +601,38 @@ class AuthorityEngine {
             line['reserved'] = line['quantity'];
           }
         }
+        final subtotal = snapshots.fold<int>(
+              0,
+              (sum, line) =>
+                  sum +
+                  roundedRatio(
+                    line['unitPrice'] as int,
+                    line['quantity'] as int,
+                    1000,
+                  ),
+            ),
+            discount = integerField(p, 'discount');
+        final approved = {
+          StaffRole.admin,
+          StaffRole.manager,
+        }.contains(actor.role);
+        if (discount > subtotal || (discount > 0 && !approved)) {
+          throw const BusinessException(
+            'permission',
+            'Chiết khấu cần quản lý duyệt và không được vượt tiền hàng.',
+          );
+        }
         return {
           ...p,
+          'total': subtotal - discount + _surcharge(p),
+          'discountApproved': approved,
+          'depositPaid': 0,
+          'depositRefundDue': 0,
+          'depositRefunded': 0,
           'lines': snapshots,
           'ownerUid': actor.uid,
+          'warehouse': warehouse,
+          'customerId': textField(p, 'customerId'),
           'status': oversell ? 'pendingApproval' : 'reserved',
         };
       case Operation.approveReservation:
@@ -564,7 +718,12 @@ class AuthorityEngine {
           );
         }
         if (op == Operation.cancelReservation) {
-          return {...old, 'status': 'cancelled', 'cancelledBy': actor.uid};
+          return {
+            ...old,
+            'status': 'cancelled',
+            'cancelledBy': actor.uid,
+            'depositRefundDue': old['depositPaid'] as int? ?? 0,
+          };
         }
         final saleId = textField(p, 'saleId');
         if ((await read('sale', saleId)).isNotEmpty) {
@@ -612,7 +771,26 @@ class AuthorityEngine {
           {...old, 'lines': lines, 'reservationId': id},
           {},
           actor,
+          quoteSnapshot: old,
         );
+        final prepaid = old['depositPaid'] as int? ?? 0,
+            applied = prepaid < (result['total'] as int)
+                ? prepaid
+                : result['total'] as int;
+        if (applied > 0) {
+          final customer = old['customerId'] as String,
+              receivable = await read(
+                'receivable',
+                old['customerId'] as String,
+              );
+          await _write('receivable', customer, {
+            'balance': (receivable['balance'] as int) - applied,
+          });
+          await _depositChange(customer, -applied);
+          result['paid'] = applied;
+          result['debt'] = (result['total'] as int) - applied;
+          result['depositApplied'] = applied;
+        }
         final sale = {
           ...result,
           'id': saleId,
@@ -625,6 +803,8 @@ class AuthorityEngine {
           'status': 'converted',
           'saleId': saleId,
           'saleDocument': sale,
+          'depositAllocated': applied,
+          'depositRefundDue': prepaid - applied,
           'unfulfilledLines': [
             for (final line in original)
               if (partial &&
@@ -691,6 +871,7 @@ class AuthorityEngine {
         }
         final result = {
           ...p,
+          'customerId': textField(p, 'customerId'),
           'lines': snapshots,
           'total': subtotal - discount + _surcharge(p),
           'storeSnapshot': await read('settings', 'store'),
@@ -1096,6 +1277,8 @@ class AuthorityEngine {
         return {
           ...p,
           'storeSnapshot': await read('settings', 'store'),
+          'warehouse': textField(p, 'warehouse'),
+          'supplierId': textField(p, 'supplierId'),
           'supplierName':
               (await read('party', p['supplierId'] as String))['name'] ??
               p['supplierId'],
@@ -1297,6 +1480,8 @@ class AuthorityEngine {
         return {
           ...p,
           'lines': snapshots,
+          'warehouse': warehouse,
+          'customerId': customer,
           'total': total,
           'surcharge': _surcharge(p),
           'storeSnapshot':
@@ -1436,11 +1621,7 @@ class AuthorityEngine {
           if (quantity > available) {
             throw const BusinessException('stock', 'Không đủ hàng cách ly.');
           }
-          final value = roundedRatio(
-            current['value'] as int,
-            quantity,
-            available,
-          );
+          final value = await _issueValue(warehouse, product, quantity);
           await _stockChange(
             warehouse,
             product,
@@ -1596,6 +1777,15 @@ class AuthorityEngine {
   int _surcharge(Map<String, dynamic> payload) => payload['surcharge'] == null
       ? 0
       : integerField(payload, 'surcharge', max: 1000000000000);
+  Future<void> _depositChange(String customer, int delta) async {
+    final old = await read('customerDeposit', customer),
+        next = (old['balance'] as int? ?? 0) + delta;
+    if (next < 0 || next > 9000000000000) {
+      throw const BusinessException('deposit', 'Số dư cọc không hợp lệ.');
+    }
+    await _write('customerDeposit', customer, {'balance': next});
+  }
+
   void _date(Map<String, dynamic> payload, String key) {
     final raw = payload[key] as String? ?? '';
     if (raw.isNotEmpty && DateTime.tryParse(raw) == null) {

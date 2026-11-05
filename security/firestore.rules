@@ -13,7 +13,7 @@ service cloud.firestore {
     function station(store) { return member(store) && role(store) == 'station'; }
     function operationAllowed(store, operation) {
       return role(store) == 'admin' || (role(store) == 'manager' && operation != 'staff') ||
-        (role(store) == 'sales' && operation in ['printRequest','reservation','cancelReservation','fulfillReservation','quote','quoteToSale','sale','payment','warranty','party']) ||
+        (role(store) == 'sales' && operation in ['deposit','printRequest','reservation','cancelReservation','fulfillReservation','quote','quoteToSale','sale','payment','warranty','party']) ||
         (role(store) == 'warehouse' && operation in ['printRequest','catalog','purchase','receive','quarantine','warrantyUpdate']) ||
         (role(store) == 'driver' && operation in ['delivery','printRequest']);
     }

@@ -1,4 +1,4 @@
-# Chạy và vận hành bản phát triển 0.3
+# Chạy và vận hành VLXD Bảy Hải
 
 Đây là bản đang kiểm chứng, chưa đánh dấu đáp ứng toàn bộ V1.0. Không dùng dữ
 liệu kiểm thử làm số liệu cửa hàng. Xem PROGRESS.md để biết trạng thái mới nhất.
@@ -13,9 +13,8 @@ không nâng Blaze, không bật Functions/Storage, không sửa project cũ.
 quản trị. Quyền thực tế nằm ở Auth, membership, Rules và trạm được tin cậy.
 Không thêm service-account key hoặc mật khẩu vào file này.
 
-Auth đang chờ chủ tài khoản bấm **Get started** và bật **Email/Password** trong
-Firebase Console của đúng project trên. Không chọn nâng cấp Identity Platform
-hoặc Blaze. Công cụ `node tools/manage-store.cjs status` chỉ đọc trạng thái.
+Email/Password đã bật và Firestore Rules đã triển khai trên project này.
+`node tools/manage-store.cjs status` đọc trạng thái Auth hiện tại.
 
 ## Khởi tạo tài khoản bằng quyền chủ project
 
@@ -31,8 +30,9 @@ node tools/manage-store.cjs create giaohang driver
 node tools/manage-store.cjs create tram station
 ```
 
-Khi tạo `admin`, nhập mật khẩu khởi tạo theo đặc tả riêng của cửa hàng. Nhân
-viên phải đổi mật khẩu trong app. Sau đó chủ project chạy:
+Tài khoản `admin` của cửa hàng đã được tạo. Đăng nhập bằng mật khẩu khởi tạo
+trong đặc tả riêng, sau đó chọn mật khẩu mới trong app. Chủ project chạy lệnh
+sau để cấp quyền ghi sổ khi Auth xác nhận việc đổi mật khẩu.
 
 ```powershell
 node tools/manage-store.cjs activate admin
@@ -65,8 +65,9 @@ trong secure storage. Cache/database tách theo UID; tài khoản khác không d
 chung nháp hoặc outbox. Không có cấu hình Firebase thì source mở giao diện xem
 thử cục bộ cũ; giao diện đó không ghi sổ cloud.
 
-Trên Windows, đăng nhập nhân viên rồi vào **Đồng bộ / Trạm** kết nối tài khoản
-trạm bằng email ánh xạ của username trạm và mật khẩu riêng. Trạm cần còn chạy
+Trên Windows, phiên trạm được lưu trong kho bảo mật của tài khoản Windows đã
+cấu hình. Khi chuyển sang máy khác, đăng nhập nhân viên rồi vào **Đồng bộ /
+Trạm** để kết nối bằng email ánh xạ của username trạm và mật khẩu riêng. Trạm cần còn chạy
 và có mạng để xác nhận nghiệp vụ của các thiết bị. Chưa có Windows Service tự
 chạy khi chưa mở app. Tắt trạm: các thiết bị vẫn lập nháp/lưu lệnh chờ, không
 coi đó là tồn kho hoặc công nợ đã xác nhận.

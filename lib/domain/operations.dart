@@ -1,8 +1,12 @@
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
+
 enum StaffRole { admin, manager, sales, warehouse, driver }
 
 enum Operation {
+  deposit,
+  reservationRefund,
   settings,
   printRequest,
   printClaim,
@@ -58,6 +62,7 @@ class Actor {
       StaffRole.admin => Operation.values.toSet(),
       StaffRole.manager => Operation.values.toSet()..remove(Operation.staff),
       StaffRole.sales => {
+        Operation.deposit,
         Operation.printRequest,
         Operation.reservation,
         Operation.cancelReservation,
@@ -158,7 +163,9 @@ class BusinessCommand {
       );
     }
   }
-  String fingerprint(String actorId) => canonicalJson({
+  String fingerprint(String actorId) =>
+      'sha256:v1:${sha256.convert(utf8.encode(legacyFingerprint(actorId)))}';
+  String legacyFingerprint(String actorId) => canonicalJson({
     'actorId': actorId,
     'entityId': entityId,
     'operation': operation.name,
@@ -168,6 +175,55 @@ class BusinessCommand {
 }
 
 class MaterialEstimate {
+  static int pipeSticks({
+    required int lengthMm,
+    required int stickLengthMm,
+    int wasteBasisPoints = 0,
+  }) {
+    if (lengthMm < 0 ||
+        stickLengthMm <= 0 ||
+        wasteBasisPoints < 0 ||
+        wasteBasisPoints > 10000) {
+      throw const BusinessException(
+        'validation',
+        'Chiều dài cây hoặc hao hụt không hợp lệ.',
+      );
+    }
+    final numerator =
+            BigInt.from(lengthMm) * BigInt.from(10000 + wasteBasisPoints),
+        denominator = BigInt.from(stickLengthMm) * BigInt.from(10000);
+    return ((numerator + denominator - BigInt.one) ~/ denominator).toInt();
+  }
+
+  static int volumeScaled({
+    required int lengthMm,
+    required int widthMm,
+    required int heightMm,
+    int wasteBasisPoints = 0,
+  }) {
+    if (lengthMm < 0 ||
+        widthMm < 0 ||
+        heightMm < 0 ||
+        wasteBasisPoints < 0 ||
+        wasteBasisPoints > 10000) {
+      throw const BusinessException(
+        'validation',
+        'Kích thước hoặc hao hụt không hợp lệ.',
+      );
+    }
+    final numerator =
+        BigInt.from(lengthMm) *
+        BigInt.from(widthMm) *
+        BigInt.from(heightMm) *
+        BigInt.from(10000 + wasteBasisPoints);
+    final denominator = BigInt.from(10000000000);
+    final value = (numerator + denominator - BigInt.one) ~/ denominator;
+    if (value > BigInt.from(1000000000)) {
+      throw const BusinessException('range', 'Thể tích vượt giới hạn hỗ trợ.');
+    }
+    return value.toInt();
+  }
+
   // Inputs in mm and square millimetres; ceil to complete sale packages.
   static int tileBoxes({
     required int areaSquareMm,

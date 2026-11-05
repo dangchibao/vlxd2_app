@@ -9,17 +9,24 @@ import '../data/app_runtime.dart';
 import '../data/database.dart';
 import '../domain/financial_report.dart';
 import '../data/xlsx_catalog.dart';
+import 'catalog_page.dart';
+import 'quotes_page.dart';
+import 'reservations_page.dart';
+import '../domain/operations.dart';
+import 'revenue_chart.dart';
 import 'business_pages.dart';
 
 class ReportsPage extends StatefulWidget {
   final AppRuntime runtime;
-  const ReportsPage({super.key, required this.runtime});
+  final bool dashboard;
+  const ReportsPage({super.key, required this.runtime, this.dashboard = false});
   @override
   State<ReportsPage> createState() => _ReportsPageState();
 }
 
 class _ReportsPageState extends State<ReportsPage> {
   int days = 30;
+  DateTimeRange? customRange;
   String exportKind = 'stock';
   Future<void> exportSummary(
     FinancialReport report,
@@ -175,12 +182,20 @@ class _ReportsPageState extends State<ReportsPage> {
         return const Center(child: CircularProgressIndicator());
       }
       final now = DateTime.now(),
-          start = DateTime(
-            now.year,
-            now.month,
-            now.day,
-          ).subtract(Duration(days: days - 1)),
-          end = DateTime(now.year, now.month, now.day + 1);
+          start =
+              customRange?.start ??
+              DateTime(
+                now.year,
+                now.month,
+                now.day,
+              ).subtract(Duration(days: days - 1)),
+          end = customRange == null
+              ? DateTime(now.year, now.month, now.day + 1)
+              : DateTime(
+                  customRange!.end.year,
+                  customRange!.end.month,
+                  customRange!.end.day + 1,
+                );
       final events = snapshot.data!,
           report = FinancialReport.fromEvents(events, start, end);
       return ListView(
@@ -189,18 +204,43 @@ class _ReportsPageState extends State<ReportsPage> {
             spacing: 16,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              const Text(
-                'Báo cáo đã xác nhận',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              Text(
+                widget.dashboard ? 'Tổng quan cửa hàng' : 'Báo cáo đã xác nhận',
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               DropdownButton<int>(
-                value: days,
+                value: customRange == null ? days : null,
+                hint: const Text('Tùy chọn'),
                 items: const [
                   DropdownMenuItem(value: 7, child: Text('7 ngày')),
                   DropdownMenuItem(value: 30, child: Text('30 ngày')),
                   DropdownMenuItem(value: 90, child: Text('90 ngày')),
                 ],
-                onChanged: (v) => setState(() => days = v!),
+                onChanged: (v) => setState(() {
+                  days = v!;
+                  customRange = null;
+                }),
+              ),
+              TextButton.icon(
+                onPressed: () async {
+                  final range = await showDateRangePicker(
+                    context: context,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime.now(),
+                    initialDateRange: DateTimeRange(
+                      start: start,
+                      end: end.subtract(const Duration(days: 1)),
+                    ),
+                  );
+                  if (range != null && mounted) {
+                    setState(() => customRange = range);
+                  }
+                },
+                icon: const Icon(Icons.date_range),
+                label: const Text('Chọn ngày'),
               ),
               OutlinedButton.icon(
                 onPressed: () => exportSummary(report, start, end),
@@ -213,6 +253,7 @@ class _ReportsPageState extends State<ReportsPage> {
             '${DateFormat('dd/MM/yyyy').format(start)} – ${DateFormat('dd/MM/yyyy').format(end.subtract(const Duration(days: 1)))}',
           ),
           const SizedBox(height: 20),
+          if (widget.dashboard) OperationalSummary(runtime: widget.runtime),
           Wrap(
             spacing: 12,
             crossAxisAlignment: WrapCrossAlignment.center,
@@ -283,6 +324,32 @@ class _ReportsPageState extends State<ReportsPage> {
           const SizedBox(height: 20),
           Text('Đơn bán trong kỳ: ${report.sales}'),
           const SizedBox(height: 16),
+          RevenueChart(
+            values: report.dailyRevenue,
+            end: end,
+            days: end.difference(start).inDays,
+          ),
+          if (report.products.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            const Text(
+              'Hàng bán chạy theo doanh thu thuần',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+            for (final item
+                in (report.products.values.toList()
+                      ..sort((a, b) => b.revenue.compareTo(a.revenue)))
+                    .take(10))
+              Card(
+                child: ListTile(
+                  title: Text(item.name),
+                  subtitle: Text(
+                    '${reportQuantity(item.quantity)} ${item.unit}',
+                  ),
+                  trailing: Text(largeVnd(item.revenue)),
+                ),
+              ),
+          ],
+          const SizedBox(height: 16),
           const Text(
             'Doanh thu trừ hàng trả; giá vốn theo snapshot khi xuất. Thu nợ và trả NCC không cộng thêm doanh thu hoặc chi phí vận hành.',
           ),
@@ -317,6 +384,93 @@ class _ReportsPageState extends State<ReportsPage> {
   );
 }
 
+class OperationalSummary extends StatelessWidget {
+  final AppRuntime runtime;
+  const OperationalSummary({super.key, required this.runtime});
+  @override
+  Widget build(BuildContext context) => StreamBuilder(
+    stream:
+        (runtime.db.select(runtime.db.businessRecords)..where(
+              (r) => r.kind.isIn(['stock', 'receivable', 'payable', 'sale']),
+            ))
+            .watch(),
+    builder: (context, snapshot) {
+      if (!snapshot.hasData) return const SizedBox();
+      var inventory = BigInt.zero,
+          receivables = BigInt.zero,
+          payables = BigInt.zero,
+          pending = 0;
+      for (final row in snapshot.data!) {
+        final data = recordData(row);
+        if (row.kind == 'stock') inventory += BigInt.from(data['value'] as int);
+        if (row.kind == 'receivable') {
+          receivables += BigInt.from(data['balance'] as int);
+        }
+        if (row.kind == 'payable') {
+          payables += BigInt.from(data['balance'] as int);
+        }
+        if (row.kind == 'sale' &&
+            (data['lines'] as List).any(
+              (l) =>
+                  (l['delivered'] as int) <
+                  (l['quantity'] as int) - (l['returned'] as int? ?? 0),
+            )) {
+          pending++;
+        }
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              for (final card in [
+                ('Giá trị tồn kho', largeVnd(inventory)),
+                ('Khách còn nợ', largeVnd(receivables)),
+                ('Nợ nhà cung cấp', largeVnd(payables)),
+                ('Đơn còn giao', '$pending'),
+              ])
+                SizedBox(
+                  width: 240,
+                  child: Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(18),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(card.$1),
+                          const SizedBox(height: 8),
+                          Text(
+                            card.$2,
+                            style: const TextStyle(
+                              fontSize: 21,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xff0055d9),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          StreamBuilder(
+            stream: runtime.db.watchQueue(),
+            builder: (context, queue) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'Chưa xác nhận trên thiết bị: ${(queue.data ?? []).where((r) => {'pending', 'syncing'}.contains(r.status)).length} lệnh • Chưa tính vào số liệu đã ghi sổ.',
+              ),
+            ),
+          ),
+        ],
+      );
+    },
+  );
+}
+
 class GlobalSearchPage extends StatefulWidget {
   final AppRuntime runtime;
   const GlobalSearchPage({super.key, required this.runtime});
@@ -331,6 +485,71 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
   bool busy = false;
   int generation = 0;
   Timer? debounce;
+  void openRecord(BusinessRecord row) {
+    final data = recordData(row), runtime = widget.runtime;
+    Widget? destination;
+    if (row.kind == 'sale' || row.kind == 'purchase') {
+      destination = TradingPage(
+        runtime: runtime,
+        purchase: row.kind == 'purchase',
+        onlyId: data['id'] as String,
+      );
+    }
+    if (row.kind == 'quote') {
+      destination = QuotesPage(runtime: runtime, onlyId: data['id'] as String);
+    }
+    if (row.kind == 'reservation') {
+      destination = ReservationsPage(
+        runtime: runtime,
+        onlyId: data['id'] as String,
+      );
+    }
+    if (row.kind == 'catalog' && allowed(runtime, Operation.catalog)) {
+      Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => CatalogEditor(runtime: runtime, row: row),
+        ),
+      );
+      return;
+    }
+    if (row.kind == 'party' && allowed(runtime, Operation.party)) {
+      PartiesPage(runtime: runtime).edit(context, row: row, data: data);
+      return;
+    }
+    if (destination != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => Scaffold(
+            appBar: AppBar(title: const Text('Chứng từ')),
+            body: Padding(
+              padding: const EdgeInsets.all(20),
+              child: destination!,
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Chi tiết'),
+        content: SizedBox(
+          width: 540,
+          child: SingleChildScrollView(child: RecordDetails(data: data)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Đóng'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
     debounce?.cancel();
@@ -435,28 +654,7 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
                               '${r.kind} • ${shortId(r.id.split(':').last)}',
                         ),
                         subtitle: const Text('Mở chi tiết chứng từ'),
-                        onTap: () => showDialog<void>(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            title: const Text('Chi tiết'),
-                            content: SizedBox(
-                              width: 540,
-                              child: SingleChildScrollView(
-                                child: RecordDetails(
-                                  data: jsonDecode(
-                                    r.payload,
-                                  ) as Map<String, dynamic>,
-                                ),
-                              ),
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context),
-                                child: const Text('Đóng'),
-                              ),
-                            ],
-                          ),
-                        ),
+                        onTap: () => openRecord(r),
                       ),
                     ),
                 ],

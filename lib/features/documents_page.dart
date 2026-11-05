@@ -15,6 +15,8 @@ class DocumentsPage extends StatefulWidget {
 class _DocumentsPageState extends State<DocumentsPage> {
   String kind = 'payment';
   static const kinds = {
+    'deposit': 'Thu đặt cọc',
+    'reservationRefund': 'Hoàn đặt cọc',
     'payment': 'Phiếu thu',
     'supplierPayment': 'Chi NCC',
     'refund': 'Hoàn tiền',

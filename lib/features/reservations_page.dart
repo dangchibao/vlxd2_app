@@ -19,11 +19,13 @@ String reservationStatus(Object? status) => switch (status) {
 
 class ReservationsPage extends StatelessWidget {
   final AppRuntime runtime;
-  const ReservationsPage({super.key, required this.runtime});
+  final String? onlyId;
+  const ReservationsPage({super.key, required this.runtime, this.onlyId});
   @override
   Widget build(BuildContext context) => RecordList(
     runtime: runtime,
     kind: 'reservation',
+    onlyId: onlyId,
     title: 'Giữ hàng / Duyệt vượt tồn',
     item: (context, row, data) => Card(
       child: Padding(
@@ -39,9 +41,81 @@ class ReservationsPage extends StatelessWidget {
               Text(
                 '${line['name']} • Đặt ${qty(line['quantity'] as int)} • Giữ ${qty(line['reserved'] as int)}',
               ),
+            Text(
+              'Giá trị: ${vnd(data['total'] as int? ?? 0)} • Đã thu cọc: ${vnd(data['depositPaid'] as int? ?? 0)} • Cọc cần hoàn: ${vnd(data['depositRefundDue'] as int? ?? 0)}',
+            ),
             Wrap(
               spacing: 8,
               children: [
+                if ({
+                      'reserved',
+                      'waiting',
+                      'partial',
+                    }.contains(data['status']) &&
+                    allowed(runtime, Operation.deposit))
+                  OutlinedButton(
+                    onPressed: () => commandDialog(
+                      context,
+                      runtime,
+                      title: 'Thu tiền đặt cọc',
+                      operation: Operation.deposit,
+                      entityId: data['id'] as String,
+                      version: row.version,
+                      balance:
+                          (data['total'] as int? ?? 0) -
+                          (data['depositPaid'] as int? ?? 0),
+                      fields: [
+                        const InputField(
+                          'amount',
+                          'Số tiền cọc (VND)',
+                          number: true,
+                        ),
+                        const InputField(
+                          'method',
+                          'Phương thức',
+                          choices: methods,
+                        ),
+                        InputField(
+                          'shiftId',
+                          'Ca thu tiền',
+                          initial: currentShift(runtime),
+                        ),
+                      ],
+                    ),
+                    child: const Text('Thu đặt cọc'),
+                  ),
+                if ((data['depositRefundDue'] as int? ?? 0) > 0 &&
+                    allowed(runtime, Operation.reservationRefund))
+                  OutlinedButton(
+                    onPressed: () => commandDialog(
+                      context,
+                      runtime,
+                      title: 'Hoàn tiền cọc còn lại',
+                      operation: Operation.reservationRefund,
+                      entityId: data['id'] as String,
+                      version: row.version,
+                      balance: data['depositRefundDue'] as int,
+                      fields: [
+                        const InputField(
+                          'amount',
+                          'Số tiền hoàn cọc (VND)',
+                          number: true,
+                        ),
+                        const InputField(
+                          'method',
+                          'Phương thức',
+                          choices: methods,
+                        ),
+                        InputField(
+                          'shiftId',
+                          'Ca chi tiền',
+                          initial: currentShift(runtime),
+                        ),
+                        const InputField('reason', 'Lý do hoàn cọc'),
+                      ],
+                    ),
+                    child: const Text('Hoàn cọc'),
+                  ),
                 if ({'pendingApproval', 'waiting'}.contains(data['status']) &&
                     allowed(runtime, Operation.approveReservation))
                   FilledButton(

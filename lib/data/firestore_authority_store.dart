@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
+
 import '../domain/operations.dart';
 import 'authority_engine.dart';
 import 'authority_store.dart';
@@ -284,38 +286,62 @@ class RemoteAuthorityProcessor {
       throw const BusinessException('missing', 'Không tìm thấy command.');
     }
     final data = remote.data;
-    if (data['commandId'] != commandId) {
-      throw const BusinessException('validation', 'Command ID không khớp.');
-    }
-    final operation = Operation.values
-        .where((o) => o.name == data['operation'])
-        .firstOrNull;
-    if (operation == null || data['payload'] is! Map<String, dynamic>) {
-      throw const BusinessException('validation', 'Command không hợp lệ.');
-    }
-    final command = BusinessCommand(
-      id: commandId,
-      entityId: textField(data, 'entityId'),
-      operation: operation,
-      payload: data['payload'] as Map<String, dynamic>,
-      expectedVersion: integerField(data, 'expectedVersion'),
-    );
-    final actorUid = textField(data, 'actorUid');
+    final actorUid = data['actorUid'] is String
+        ? data['actorUid'] as String
+        : 'invalid';
+    BusinessCommand? command;
     try {
+      if (data['commandId'] != commandId) {
+        throw const BusinessException('validation', 'Mã giao dịch không khớp.');
+      }
+      final operation = Operation.values
+          .where((o) => o.name == data['operation'])
+          .firstOrNull;
+      if (operation == null || data['payload'] is! Map<String, dynamic>) {
+        throw const BusinessException(
+          'validation',
+          'Loại giao dịch hoặc dữ liệu không hợp lệ.',
+        );
+      }
+      command = BusinessCommand(
+        id: commandId,
+        entityId: textField(data, 'entityId'),
+        operation: operation,
+        payload: data['payload'] as Map<String, dynamic>,
+        expectedVersion: integerField(data, 'expectedVersion'),
+      );
       return await AuthorityEngine.withStore(store)
           .executeAuthenticated(command, () => store.actor(actorUid));
-    } on BusinessException catch (error) {
+    } catch (error) {
+      if (error is! BusinessException &&
+          error is! FormatException &&
+          error is! TypeError &&
+          error is! ArgumentError &&
+          error is! JsonUnsupportedObjectError) {
+        rethrow;
+      }
+      final failure = error is BusinessException
+          ? error
+          : const BusinessException(
+              'validation',
+              'Dữ liệu giao dịch sai định dạng. Vui lòng kiểm tra và lập chứng từ mới.',
+            );
+      final rawHash = sha256.convert(
+        utf8.encode(canonicalJson(remote.rawFields)),
+      );
+      final fingerprint =
+          command?.fingerprint(actorUid) ?? 'invalid:sha256:$rawHash';
       return store.transaction(() async {
         final path = store._path('receipts', commandId);
         final existing = await store._load(path);
         if (existing != null) return existing['result'] as Map<String, dynamic>;
-        final status = error.code == 'conflict' ? 'conflict' : 'error';
-        final result = {'code': error.code, 'message': error.message};
+        final status = failure.code == 'conflict' ? 'conflict' : 'error';
+        final result = {'code': failure.code, 'message': failure.message};
         await store._put(path, {
           'commandId': commandId,
           'actorUid': actorUid,
           'status': status,
-          'fingerprint': command.fingerprint(actorUid),
+          'fingerprint': fingerprint,
           'result': result,
           'confirmedAt': DateTime.now().toUtc(),
         });

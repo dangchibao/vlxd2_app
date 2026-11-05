@@ -12,6 +12,14 @@ class FirestoreFailure implements Exception {
   String toString() => 'Không xử lý được dữ liệu đồng bộ (mã $status).';
 }
 
+/// Preserves rejection of unsupported business values without poisoning a
+/// whole command query. Raw typed fields remain available for a rejection hash.
+class UnsupportedFirestoreValue {
+  const UnsupportedFirestoreValue();
+  @override
+  String toString() => 'Giá trị Firestore không được hỗ trợ';
+}
+
 class RemoteDocument {
   final String name;
   final Map<String, dynamic> data;
@@ -165,6 +173,7 @@ class FirestoreRest {
             found['name'] as String,
             decodeFields(found['fields'] as Map<String, dynamic>? ?? {}),
             found['updateTime'] as String?,
+            rawFields: found['fields'] as Map<String, dynamic>? ?? {},
           );
         }
         if (row['missing'] != null) return null;
@@ -196,6 +205,7 @@ class FirestoreRest {
         doc['name'] as String,
         decodeFields(doc['fields'] as Map<String, dynamic>? ?? {}),
         doc['updateTime'] as String?,
+        rawFields: doc['fields'] as Map<String, dynamic>? ?? {},
       );
     } on FirestoreFailure catch (e) {
       if (e.status == 404) return null;
@@ -280,7 +290,7 @@ class FirestoreRest {
     if (value.containsKey('integerValue')) {
       final n = BigInt.parse('${value['integerValue']}');
       if (n.abs() > BigInt.from(9000000000000000)) {
-        throw const FormatException('Số nguyên vượt giới hạn');
+        return const UnsupportedFirestoreValue();
       }
       return n.toInt();
     }
@@ -303,6 +313,6 @@ class FirestoreRest {
           .map((v) => _decode(v as Map<String, dynamic>))
           .toList();
     }
-    throw const FormatException('Giá trị Firestore chưa hỗ trợ');
+    return const UnsupportedFirestoreValue();
   }
 }

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vlxd_bay_hai/data/database.dart';
 import 'package:vlxd_bay_hai/data/authority_engine.dart';
 import 'package:vlxd_bay_hai/domain/operations.dart';
+import 'package:vlxd_bay_hai/domain/financial_report.dart';
 
 void main() {
   late AppDatabase db;
@@ -58,6 +59,124 @@ void main() {
     }, version: 1);
   });
   tearDown(() => db.close());
+  test('Deposits apply once on sale conversion without counting revenue or cash twice', () async {
+    await run(Operation.reservation, 'r', order(4000), actor: sales);
+    await run(
+      Operation.deposit,
+      'r',
+      {'amount': 100, 'method': 'cash', 'shiftId': 'shift'},
+      version: 1,
+      actor: sales,
+    );
+    await run(
+      Operation.deposit,
+      'r',
+      {'amount': 50, 'method': 'bank', 'shiftId': 'shift'},
+      version: 2,
+      actor: sales,
+    );
+    expect((await engine.read('customerDeposit', 'c'))['balance'], 150);
+    await run(
+      Operation.fulfillReservation,
+      'r',
+      {'saleId': 's'},
+      version: 3,
+      actor: sales,
+    );
+    final sale = await engine.read('sale', 's');
+    expect(sale['total'], 400);
+    expect(sale['paid'], 150);
+    expect(sale['debt'], 250);
+    expect((await engine.read('customerDeposit', 'c'))['balance'], 0);
+    final report = FinancialReport.fromEvents(
+      await db.select(db.businessEvents).get(),
+      DateTime(2020),
+      DateTime(2100),
+    );
+    expect(report.revenue, BigInt.from(400));
+    expect(report.cashNet, BigInt.from(100));
+    expect(report.bankNet, BigInt.from(50));
+    final close = await run(Operation.shiftClose, 'close', {
+      'shiftId': 'shift',
+      'opening': 0,
+      'counted': 100,
+      'explanation': '',
+    });
+    expect(close['difference'], 0);
+  });
+  test(
+    'Cancelling a prepaid reservation leaves controlled refundable liability',
+    () async {
+      await run(Operation.reservation, 'r', order(4000), actor: sales);
+      await run(
+        Operation.deposit,
+        'r',
+        {'amount': 200, 'method': 'cash', 'shiftId': 'shift'},
+        version: 1,
+        actor: sales,
+      );
+      await run(
+        Operation.cancelReservation,
+        'r',
+        {'reason': 'Khách hủy'},
+        version: 2,
+        actor: sales,
+      );
+      expect((await engine.read('reservation', 'r'))['depositRefundDue'], 200);
+      await run(Operation.reservationRefund, 'r', {
+        'amount': 150,
+        'method': 'cash',
+        'shiftId': 'shift',
+        'reason': 'Hoàn cọc',
+      }, version: 3);
+      await expectLater(
+        run(Operation.reservationRefund, 'r', {
+          'amount': 51,
+          'method': 'cash',
+          'shiftId': 'shift',
+          'reason': 'Vượt',
+        }, version: 4),
+        throwsA(isA<BusinessException>()),
+      );
+      expect((await engine.read('customerDeposit', 'c'))['balance'], 50);
+      expect((await engine.read('shiftTotals', 'shift'))['cashNet'], 50);
+    },
+  );
+  test('Partial fulfillment applies available deposit and keeps the excess refundable', () async {
+    await run(Operation.reservation, 'r', order(8000), actor: sales);
+    await expectLater(
+      run(
+        Operation.deposit,
+        'r',
+        {'amount': 700, 'method': 'cash', 'shiftId': 'shift'},
+        version: 1,
+        actor: sales,
+      ),
+      throwsA(isA<BusinessException>()),
+    );
+    await run(Operation.approveReservation, 'r', {
+      'decision': 'partial',
+      'reason': 'Giao trước',
+    }, version: 1);
+    await run(
+      Operation.deposit,
+      'r',
+      {'amount': 700, 'method': 'cash', 'shiftId': 'shift'},
+      version: 2,
+      actor: sales,
+    );
+    final result = await run(
+      Operation.fulfillReservation,
+      'r',
+      {'saleId': 's', 'partial': true},
+      version: 3,
+      actor: sales,
+    );
+    expect(result['depositRefundDue'], 200);
+    expect((await engine.read('sale', 's'))['paid'], 500);
+    expect((await engine.read('sale', 's'))['debt'], 0);
+    expect((await engine.read('customerDeposit', 'c'))['balance'], 200);
+  });
   test(
     'Held stock prevents other sales; cancellation releases exactly once',
     () async {

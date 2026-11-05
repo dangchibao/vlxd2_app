@@ -95,7 +95,10 @@ class BayHaiApp extends StatelessWidget {
     debugShowCheckedModeBanner: false,
     routerConfig: router,
     theme: ThemeData(
-      colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff0059df)),
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: const Color(0xff0059df),
+        primary: const Color(0xff0055d9),
+      ),
       scaffoldBackgroundColor: const Color(0xfff2f6fd),
       useMaterial3: true,
       inputDecorationTheme: const InputDecorationTheme(
@@ -211,7 +214,7 @@ class _WorkspaceState extends ConsumerState<Workspace> {
         : driver
         ? [DeliveriesPage(runtime: runtime), ConnectionPage(runtime: runtime)]
         : [
-            ReportsPage(runtime: runtime),
+            ReportsPage(runtime: runtime, dashboard: true),
             CatalogPage(runtime: runtime),
             TradingPage(runtime: runtime),
             TradingPage(runtime: runtime, purchase: true),

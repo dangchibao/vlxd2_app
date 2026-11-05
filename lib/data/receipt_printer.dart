@@ -24,6 +24,8 @@ class ReceiptRenderer {
       'shiftClose' => 'PHIẾU CHỐT CA',
       'expense' => 'PHIẾU CHI',
       'payment' => 'PHIẾU THU',
+      'deposit' => 'PHIẾU THU ĐẶT CỌC',
+      'reservationRefund' => 'PHIẾU HOÀN ĐẶT CỌC',
       'supplierPayment' => 'PHIẾU CHI NHÀ CUNG CẤP',
       'refund' => 'PHIẾU HOÀN TIỀN',
       'purchaseReceipt' => 'PHIẾU NHẬP KHO',
@@ -199,7 +201,14 @@ class ReceiptRenderer {
         pw.Text('Giải trình: ${data['explanation'] ?? ''}'),
       ]);
     }
-    if ({'expense', 'payment', 'supplierPayment', 'refund'}.contains(kind)) {
+    if ({
+      'expense',
+      'payment',
+      'supplierPayment',
+      'refund',
+      'deposit',
+      'reservationRefund',
+    }.contains(kind)) {
       rows.addAll([
         pw.Text('Số tiền: ${money(integerField(data, 'amount'))}'),
         pw.Text('Nội dung: ${data['reason']}'),

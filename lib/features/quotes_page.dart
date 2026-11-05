@@ -13,7 +13,8 @@ import 'business_receipt.dart';
 
 class QuotesPage extends StatelessWidget {
   final AppRuntime runtime;
-  const QuotesPage({super.key, required this.runtime});
+  final String? onlyId;
+  const QuotesPage({super.key, required this.runtime, this.onlyId});
   void edit(
     BuildContext context, {
     BusinessRecord? row,
@@ -99,6 +100,7 @@ class QuotesPage extends StatelessWidget {
   Widget build(BuildContext context) => RecordList(
     runtime: runtime,
     kind: 'quote',
+    onlyId: onlyId,
     title: 'Báo giá',
     actions: [
       if (allowed(runtime, Operation.quote))

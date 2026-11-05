@@ -255,6 +255,71 @@ void main() {
         )..where((o) => o.id.equals(commandId))).getSingle()).status,
         'confirmed',
       );
+      // Direct malformed payloads must receive a rejection and not poison the
+      // station cursor or block a valid command submitted afterwards.
+      for (var i = 0; i < 4; i++) {
+        final badId = 'malformed-$uid-$i';
+        final write = store.createWrite('stores/shop/commands/$badId', {
+          'commandId': badId,
+          'actorUid': managerUid,
+          'operation': i == 3 ? 'unknownOperation' : 'party',
+          'entityId': 'invalid-party-$uid-$i',
+          'expectedVersion': 0,
+          'payload': {
+            'name': 'Malformed fixture',
+            'type': 'customer',
+            'phone': i == 0
+                ? 123
+                : i == 1
+                ? DateTime.now().toUtc()
+                : 'fixture',
+          },
+        });
+        if (i == 2) {
+          final fields =
+              (write['update'] as Map<String, dynamic>)['fields']
+                  as Map<String, dynamic>;
+          final payload =
+              ((fields['payload'] as Map<String, dynamic>)['mapValue']
+                      as Map<String, dynamic>)['fields']
+                  as Map<String, dynamic>;
+          payload['unsupported'] = {
+            'geoPointValue': {'latitude': 10.0, 'longitude': 106.0},
+          };
+        }
+        write['updateTransforms'] = [
+          {'fieldPath': 'createdAt', 'setToServerValue': 'REQUEST_TIME'},
+        ];
+        await store.commit(manager, [write]);
+      }
+      final goodAfterId = 'after-malformed-$uid';
+      await runtime.enqueue(Operation.catalog, goodAfterId, {
+        'sku': 'AFTER-$uid',
+        'name': 'Valid after malformed queue',
+        'unit': 'bao',
+        'price': 100,
+      });
+      while (runtime.syncing) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      await runtime.tick();
+      for (var i = 0; i < 4; i++) {
+        final rejection = await store.get(
+          'stores/shop/receipts/malformed-$uid-$i',
+          manager,
+        );
+        expect(rejection?.data['status'], 'error');
+        expect(
+          (rejection!.data['fingerprint'] as String).length,
+          lessThan(100),
+        );
+      }
+      expect(
+        await (runtime.db.select(
+          runtime.db.products,
+        )..where((p) => p.id.equals(goodAfterId))).getSingleOrNull(),
+        isNotNull,
+      );
     },
     skip: !enabled,
     timeout: const Timeout(Duration(minutes: 2)),

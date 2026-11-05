@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -204,6 +205,91 @@ void main() {
       );
     },
   );
+  test('Expired token can restore verified offline cache when refresh has no network', () async {
+    final db = AppDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final vault = MemoryVault()
+      ..value = AuthSession(
+        uid: 'u',
+        idToken: 'fixture',
+        refreshToken: 'fixture',
+        expiresAt: DateTime.now().toUtc().subtract(const Duration(minutes: 1)),
+      );
+    vault.data['profile'] = {
+      'uid': 'u',
+      'role': 'sales',
+      'active': true,
+      'mustChangePassword': false,
+      'verifiedAt': DateTime.now().toUtc().toIso8601String(),
+    };
+    final runtime = AppRuntime(
+      db,
+      config,
+      client: MockClient((_) async => throw http.ClientException('offline')),
+      vault: vault,
+      stationVault: MemoryVault(),
+      databaseFactory: (_) => AppDatabase(NativeDatabase.memory()),
+    );
+    addTearDown(runtime.dispose);
+    await runtime.restore();
+    expect(runtime.actor?.uid, 'u');
+    expect(runtime.offline, true);
+    while (runtime.syncing) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+    await runtime.enqueue(Operation.sale, 'offline', {
+      'lines': [],
+    }, syncNow: false);
+    expect(
+      (await runtime.db.select(runtime.db.outbox).get()).single.status,
+      'pending',
+    );
+  });
+  test('A delayed old token refresh cannot replace a new user session after logout', () async {
+    final db = AppDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final started = Completer<void>(), response = Completer<http.Response>();
+    final runtime = AppRuntime(
+      db,
+      config,
+      client: MockClient((_) async {
+        started.complete();
+        return response.future;
+      }),
+      vault: MemoryVault(),
+      stationVault: MemoryVault(),
+    );
+    addTearDown(runtime.dispose);
+    runtime.session = AuthSession(
+      uid: 'old',
+      idToken: 'old-fixture',
+      refreshToken: 'old-fixture',
+      expiresAt: DateTime.now().toUtc().subtract(const Duration(minutes: 1)),
+    );
+    final refresh = runtime.currentSession();
+    await started.future;
+    await runtime.logout();
+    runtime.session = AuthSession(
+      uid: 'new',
+      idToken: 'new-fixture',
+      refreshToken: 'new-fixture',
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    );
+    final check = expectLater(refresh, throwsA(isA<AuthFailure>()));
+    response.complete(
+      http.Response(
+        jsonEncode({
+          'user_id': 'old',
+          'id_token': 'refreshed-old',
+          'refresh_token': 'old-fixture',
+          'expires_in': '3600',
+        }),
+        200,
+      ),
+    );
+    await check;
+    expect(runtime.session?.uid, 'new');
+  });
   for (final offset in [const Duration(hours: -13), const Duration(hours: 1)]) {
     test(
       'Offline cache refuses expired or future verification time $offset',

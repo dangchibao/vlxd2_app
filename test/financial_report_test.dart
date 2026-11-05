@@ -48,9 +48,14 @@ void main() {
       expect(r.cashNet, BigInt.from(95000));
       expect(r.bankNet, BigInt.from(-10000));
       expect(r.sales, 0);
+      expect(
+        r.dailyRevenue[reportDay(DateTime(2026, 11, 2))],
+        BigInt.from(-20000),
+      );
     },
   );
   test('Report totals format exactly beyond JavaScript safe integer range', () {
+    expect(reportQuantity(BigInt.from(-500)), '-0,5');
     expect(
       largeVnd(BigInt.parse('90000000000000001')),
       '90.000.000.000.000.001 đ',

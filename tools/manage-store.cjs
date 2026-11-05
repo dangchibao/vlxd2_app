@@ -84,9 +84,9 @@ async function main() {
   let next;
   if (command === 'create') {
     if (previous) throw Error('Membership đã có; không ghi đè.');
-    next = {displayName:username,username,role,active:true,mustChangePassword:role !== 'station',bootstrapPasswordUpdatedAt:Math.floor(user.passwordUpdatedAt)};
+    next = {displayName:username,username,role,active:true,mustChangePassword:role !== 'station',bootstrapPasswordUpdatedAt:String(user.passwordUpdatedAt)};
   } else if (command === 'activate') {
-    if (!previous || user.disabled || !old.bootstrapPasswordUpdatedAt || !(user.passwordUpdatedAt > old.bootstrapPasswordUpdatedAt)) throw Error('Chưa có bằng chứng đổi mật khẩu sau khởi tạo. Không kích hoạt.');
+    if (!previous || user.disabled || !Number.isFinite(Number(old.bootstrapPasswordUpdatedAt)) || !(Number(user.passwordUpdatedAt) > Number(old.bootstrapPasswordUpdatedAt))) throw Error('Chưa có bằng chứng đổi mật khẩu sau khởi tạo. Không kích hoạt.');
     next = {...old,mustChangePassword:false,activatedAt:new Date().toISOString()};
   } else if (command === 'set-role') {
     if (!previous || !roles.has(role) || role === 'station' || old.role === 'station') throw Error('Không đổi loại tài khoản trạm. Cần membership và vai trò nhân viên hợp lệ.');

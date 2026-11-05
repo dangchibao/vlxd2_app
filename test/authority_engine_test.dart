@@ -89,6 +89,37 @@ void main() {
       expect((await engine.stock('main', product))['quantity'], 60000);
     },
   );
+  test('Pipe lengths and volume use exact scale arithmetic and round up sale units', () {
+    expect(
+      MaterialEstimate.pipeSticks(lengthMm: 10000, stickLengthMm: 4000),
+      3,
+    );
+    expect(
+      MaterialEstimate.pipeSticks(
+        lengthMm: 8000,
+        stickLengthMm: 4000,
+        wasteBasisPoints: 500,
+      ),
+      3,
+    );
+    expect(
+      MaterialEstimate.volumeScaled(
+        lengthMm: 10000,
+        widthMm: 2000,
+        heightMm: 100,
+      ),
+      2000,
+    );
+    expect(
+      MaterialEstimate.volumeScaled(
+        lengthMm: 10000,
+        widthMm: 2000,
+        heightMm: 100,
+        wasteBasisPoints: 500,
+      ),
+      2100,
+    );
+  });
   test('Weighted average across receipts and issue cost', () async {
     await receive(100000, id: 'p1');
     await receive(100000, id: 'p2', cost: 14000);
@@ -179,6 +210,38 @@ void main() {
     expect(
       (await engine.stock('main', product, quality: 'quarantine'))['quantity'],
       3000,
+    );
+  });
+  test('Quality states share one warehouse weighted average and value is conserved', () async {
+    await receive(1000, cost: 10000);
+    await receive(
+      1000,
+      id: 'quarantine-po',
+      cost: 30000,
+      quality: 'quarantine',
+    );
+    expect((await engine.stock('main', product))['value'], 20000);
+    expect(
+      (await engine.stock('main', product, quality: 'quarantine'))['value'],
+      20000,
+    );
+    final posted = await sale(1000);
+    expect(posted['cost'], 20000);
+    expect((await engine.stock('main', product))['value'], 0);
+    expect(
+      (await engine.stock('main', product, quality: 'quarantine'))['value'],
+      20000,
+    );
+    await apply(Operation.release, 'release-average', {
+      'warehouse': 'main',
+      'productId': product,
+      'quantity': 1000,
+      'reason': 'Đã kiểm tra',
+    });
+    expect((await engine.stock('main', product))['value'], 20000);
+    expect(
+      (await engine.stock('main', product, quality: 'quarantine'))['value'],
+      0,
     );
   });
   test('Multiple payments and trips never deduct stock twice', () async {

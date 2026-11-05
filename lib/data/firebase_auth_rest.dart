@@ -60,8 +60,9 @@ class FirebaseAuthRest {
           )
           .timeout(const Duration(seconds: 20));
       if (response.statusCode != 200) {
-        throw const AuthFailure(
+        throw AuthFailure(
           'Không xác thực được. Kiểm tra tài khoản, mật khẩu hoặc quyền truy cập.',
+          retryable: response.statusCode == 429 || response.statusCode >= 500,
         );
       }
       return jsonDecode(response.body) as Map<String, dynamic>;
@@ -140,8 +141,9 @@ class FirebaseAuthRest {
           )
           .timeout(const Duration(seconds: 20));
       if (response.statusCode != 200) {
-        throw const AuthFailure(
+        throw AuthFailure(
           'Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.',
+          retryable: response.statusCode == 429 || response.statusCode >= 500,
         );
       }
       final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -156,7 +158,10 @@ class FirebaseAuthRest {
     } on AuthFailure {
       rethrow;
     } catch (_) {
-      throw const AuthFailure('Không thể gia hạn phiên đăng nhập.');
+      throw const AuthFailure(
+        'Không thể gia hạn phiên đăng nhập.',
+        retryable: true,
+      );
     }
   }
 }
