@@ -5,6 +5,8 @@ import 'package:uuid/uuid.dart';
 
 import '../data/app_runtime.dart';
 import '../data/database.dart';
+import '../data/receipt_printer.dart';
+import 'business_receipt.dart';
 import '../domain/operations.dart';
 import '../domain/product_policy.dart';
 import 'business_pages.dart';
@@ -22,6 +24,79 @@ class CatalogPage extends StatelessWidget {
       builder: (_) => CatalogEditor(runtime: runtime, row: row),
     ),
   );
+  Future<void> openLabel(
+    BuildContext context,
+    Map<String, dynamic> product,
+  ) async {
+    final codes = [
+      product['barcode'],
+      product['sku'],
+    ].whereType<String>().where(validLabelCode).toSet().toList();
+    if (codes.isEmpty) {
+      feedback(context, 'Cần SKU hoặc mã vạch hợp lệ để tạo tem.');
+      return;
+    }
+    var code = codes.first, copies = '1';
+    final selected = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('Tạo tem mã vạch'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<String>(
+                initialValue: code,
+                decoration: const InputDecoration(labelText: 'Mã trên tem'),
+                items: [
+                  for (final option in codes)
+                    DropdownMenuItem(value: option, child: Text(option)),
+                ],
+                onChanged: (value) => code = value!,
+              ),
+              TextFormField(
+                initialValue: copies,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Số tem, từ 1 đến 100',
+                ),
+                onChanged: (value) => update(() => copies = value),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Đóng'),
+            ),
+            FilledButton(
+              onPressed:
+                  (int.tryParse(copies) ?? 0) < 1 ||
+                      (int.tryParse(copies) ?? 0) > 100
+                  ? null
+                  : () => Navigator.pop(context, {
+                      ...product,
+                      'labelCode': code,
+                      'copies': int.parse(copies),
+                    }),
+              child: const Text('Xem trước'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (selected == null || !context.mounted) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => BusinessReceipt(
+          database: runtime.db,
+          kind: 'barcodeLabel',
+          data: selected,
+        ),
+      ),
+    );
+  }
+
   Future<void> priceHistory(
     BuildContext context,
     Map<String, dynamic> product,
@@ -137,6 +212,11 @@ class CatalogPage extends StatelessWidget {
               ),
             ),
             actions: [
+              TextButton.icon(
+                onPressed: () => openLabel(context, data),
+                icon: const Icon(Icons.qr_code_2),
+                label: const Text('Tem mã vạch'),
+              ),
               TextButton.icon(
                 onPressed: () => priceHistory(context, data),
                 icon: const Icon(Icons.history),

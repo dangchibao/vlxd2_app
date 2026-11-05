@@ -1,3 +1,23 @@
+# Cập nhật 0.6.0 — 06/11/2026
+
+- Công nợ có lịch sử và phân bổ một phiếu cho nhiều chứng từ. Trạm kiểm tra
+  phiên bản và số dư, ghi số tiền vào ca một lần. Khoản trả NCC cũ theo số dư
+  vẫn được nhận diện riêng.
+- Nhập xuất tồn theo kỳ có số đầu kỳ, nhập, xuất, cuối kỳ và giá trị theo kho,
+  mã hàng, chất lượng. Có bảng biến động và xuất Excel từ sổ đồng bộ.
+- Hàng hóa có tem Code 128 khổ 60 × 40 mm, xem trước và nhật ký in Windows.
+  Nhập bảng giá Excel có bước xem giá cũ, giá mới, kiểm tra trùng và xung đột.
+- Điện thoại có thanh điều hướng Trang chủ, Bán hàng, Kho, Công nợ, Thêm và
+  lối tắt trên trang chủ theo ảnh tham chiếu.
+- Analyze sạch; 90 ca unit/widget, 10 ca Firestore Rules và 1 ca tích hợp
+  Auth/Firestore REST đạt. Đã kiểm tra gói Windows, chữ ký APK và cache PWA.
+  Tổng hợp 20.000 sự kiện kho mô phỏng mất 119 ms CPU trong một lượt đo.
+- Kiểm thử trên thiết bị thật vẫn cần điện thoại Android, Safari iPhone và
+  máy in KV804. Một số giao dịch theo lô vẫn dùng một lô mỗi mã hàng trên
+  chứng từ. Lắp bộ hỗ trợ hàng quản lý theo số lượng.
+
+---
+
 # Cập nhật 0.5.0
 
 - Tài khoản admin đầu tiên đã kích hoạt sau khi đối chiếu việc đổi mật khẩu trong Firebase Authentication. Firestore có đúng một audit kích hoạt cho tài khoản này.

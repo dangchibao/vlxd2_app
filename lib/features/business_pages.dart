@@ -17,6 +17,7 @@ import 'invoice_preparation.dart';
 import 'record_table.dart';
 import 'catalog_art.dart';
 import 'barcode_scan.dart';
+import 'debt_ledger.dart';
 
 String vnd(int value) => '${NumberFormat.decimalPattern('vi').format(value)} đ';
 String qty(int value) => NumberFormat('0.###', 'vi').format(value / 1000);
@@ -2133,6 +2134,17 @@ class FinancePage extends StatelessWidget {
                   title: '',
                   item: (context, row, data) => Card(
                     child: ListTile(
+                      onTap: kind == 'receivable' || kind == 'payable'
+                          ? () => Navigator.of(context).push<void>(
+                              MaterialPageRoute(
+                                builder: (_) => DebtLedger(
+                                  runtime: runtime,
+                                  balanceRow: row,
+                                  customer: kind == 'receivable',
+                                ),
+                              ),
+                            )
+                          : null,
                       title: Text(
                         kind == 'receivable' ||
                                 kind == 'payable' ||

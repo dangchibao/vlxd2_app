@@ -14,12 +14,19 @@ import 'quotes_page.dart';
 import 'reservations_page.dart';
 import '../domain/operations.dart';
 import 'revenue_chart.dart';
+import 'stock_period_page.dart';
 import 'business_pages.dart';
 
 class ReportsPage extends StatefulWidget {
   final AppRuntime runtime;
   final bool dashboard;
-  const ReportsPage({super.key, required this.runtime, this.dashboard = false});
+  final Widget? shortcuts;
+  const ReportsPage({
+    super.key,
+    required this.runtime,
+    this.dashboard = false,
+    this.shortcuts,
+  });
   @override
   State<ReportsPage> createState() => _ReportsPageState();
 }
@@ -243,6 +250,19 @@ class _ReportsPageState extends State<ReportsPage> {
                 label: const Text('Chọn ngày'),
               ),
               OutlinedButton.icon(
+                onPressed: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(
+                    builder: (_) => StockPeriodPage(
+                      runtime: widget.runtime,
+                      start: start,
+                      end: end,
+                    ),
+                  ),
+                ),
+                icon: const Icon(Icons.inventory_outlined),
+                label: const Text('Nhập xuất tồn'),
+              ),
+              OutlinedButton.icon(
                 onPressed: () => exportSummary(report, start, end),
                 icon: const Icon(Icons.download_outlined),
                 label: const Text('Xuất tài chính Excel'),
@@ -253,6 +273,7 @@ class _ReportsPageState extends State<ReportsPage> {
             '${DateFormat('dd/MM/yyyy').format(start)} – ${DateFormat('dd/MM/yyyy').format(end.subtract(const Duration(days: 1)))}',
           ),
           const SizedBox(height: 20),
+          ?widget.shortcuts,
           if (widget.dashboard) OperationalSummary(runtime: widget.runtime),
           Wrap(
             spacing: 12,

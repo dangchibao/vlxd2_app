@@ -31,6 +31,7 @@ enum Operation {
   receive,
   sale,
   payment,
+  debtCollection,
   delivery,
   assemble,
   qualityDisposition,

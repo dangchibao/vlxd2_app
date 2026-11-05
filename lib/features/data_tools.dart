@@ -11,6 +11,7 @@ import '../data/xlsx_parties.dart';
 import '../data/database.dart';
 import '../domain/operations.dart';
 import 'business_pages.dart';
+import 'price_excel_tools.dart';
 
 class DataToolsPage extends StatefulWidget {
   final AppRuntime runtime;
@@ -424,6 +425,8 @@ class _DataToolsPageState extends State<DataToolsPage> {
             ),
         ],
       ),
+      const SizedBox(height: 12),
+      PriceExcelTools(runtime: widget.runtime, disabled: busy),
       if (message.isNotEmpty)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 16),

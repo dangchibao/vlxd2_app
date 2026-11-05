@@ -58,6 +58,7 @@ class AuthorityEngine {
       Operation.returnSale ||
       Operation.refund => 'sale',
       Operation.supplierPayment => 'payable',
+      Operation.debtCollection => 'receivable',
       Operation.warrantyUpdate => 'warranty',
       _ => command.operation.name,
     };
@@ -1140,6 +1141,32 @@ class AuthorityEngine {
           await _stockChange(to, product, quantity, value);
         }
         return {...p, 'status': 'posted'};
+      case Operation.debtCollection:
+        if (old.isEmpty) {
+          throw const BusinessException(
+            'missing',
+            'Không tìm thấy công nợ khách hàng.',
+          );
+        }
+        final amount = integerField(p, 'amount', min: 1);
+        if (amount > (old['balance'] as int)) {
+          throw const BusinessException(
+            'overpayment',
+            'Thu vượt công nợ khách hàng.',
+          );
+        }
+        await _openShift(p, sign: 1);
+        final allocations = await _allocateDebt(id, p, customer: true);
+        final party = await read('party', id);
+        await _write('payment', 'allocated:$id:${old['version']}', {
+          ...p,
+          'allocations': allocations,
+          'customerId': id,
+          'customerName': party['name'],
+          'storeSnapshot': await read('settings', 'store'),
+          'createdAt': DateTime.now().toUtc().toIso8601String(),
+        });
+        return {...old, 'balance': (old['balance'] as int) - amount};
       case Operation.supplierPayment:
         if (old.isEmpty) {
           throw const BusinessException(
@@ -1156,9 +1183,14 @@ class AuthorityEngine {
             'Phương thức hoặc số tiền chi trả không hợp lệ.',
           );
         }
+        final allocations = p.containsKey('allocations')
+            ? await _allocateDebt(id, p, customer: false)
+            : null;
         await _write('supplierPayment', '$id:${old['version']}', {
           ...p,
+          'allocations': ?allocations,
           'supplierId': id,
+          'supplierName': (await read('party', id))['name'],
           'createdAt': DateTime.now().toUtc().toIso8601String(),
           'storeSnapshot': await read('settings', 'store'),
         });
@@ -2104,6 +2136,84 @@ class AuthorityEngine {
       'productId': product,
       'quantity': next,
     });
+  }
+
+  Future<List<Map<String, dynamic>>> _allocateDebt(
+    String party,
+    Map<String, dynamic> payload, {
+    required bool customer,
+  }) async {
+    final raw = payload['allocations'];
+    if (raw is! List || raw.isEmpty || raw.length > 20) {
+      throw const BusinessException(
+        'allocation',
+        'Chọn từ 1 đến 20 chứng từ để phân bổ.',
+      );
+    }
+    final kind = customer ? 'sale' : 'purchaseReceipt';
+    final partyKey = customer ? 'customerId' : 'supplierId';
+    final expected = integerField(payload, 'amount', min: 1);
+    final selected = <String>{};
+    final lines = <Map<String, dynamic>>[];
+    var total = 0, snapshotBytes = 0;
+    for (final line in raw) {
+      if (line is! Map<String, dynamic>) {
+        throw const BusinessException(
+          'allocation',
+          'Dòng phân bổ không hợp lệ.',
+        );
+      }
+      final id = textField(line, 'documentId');
+      final amount = integerField(line, 'amount', min: 1);
+      if (!selected.add(id)) {
+        throw const BusinessException('allocation', 'Chứng từ bị chọn trùng.');
+      }
+      total += amount;
+      if (total > expected) {
+        throw const BusinessException(
+          'allocation',
+          'Phân bổ vượt số tiền thanh toán.',
+        );
+      }
+      final document = await read(kind, id);
+      if (document[partyKey] != party ||
+          document['version'] != integerField(line, 'version', min: 1)) {
+        throw const BusinessException(
+          'conflict',
+          'Chứng từ đã đổi hoặc không thuộc đối tác.',
+        );
+      }
+      snapshotBytes += utf8.encode(jsonEncode(document)).length;
+      if (snapshotBytes > 250000) {
+        throw const BusinessException(
+          'allocation',
+          'Nhóm chứng từ quá lớn. Chia thanh toán thành các phiếu nhỏ hơn.',
+        );
+      }
+      final paid = document['paid'] as int? ?? 0;
+      final remaining = customer
+          ? document['debt'] as int
+          : (document['total'] as int) - paid;
+      if (amount > remaining) {
+        throw const BusinessException(
+          'overpayment',
+          'Phân bổ vượt số tiền còn lại của chứng từ.',
+        );
+      }
+      await _write(kind, id, {
+        ...document,
+        'paid': paid + amount,
+        if (customer) 'debt': remaining - amount,
+      });
+      lines.add({'documentId': id, 'amount': amount});
+    }
+    if (total != expected) {
+      throw const BusinessException(
+        'allocation',
+        'Tổng phân bổ phải bằng số tiền thanh toán.',
+      );
+    }
+    return lines;
   }
 
   Future<void> _openShift(Map<String, dynamic> payload, {int sign = -1}) async {

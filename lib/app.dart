@@ -144,6 +144,7 @@ class _WorkspaceState extends ConsumerState<Workspace> {
   Widget build(BuildContext context) {
     final runtime = SessionScope.maybeOf(context);
     final driver = runtime?.actor?.role == StaffRole.driver;
+    final mobile = MediaQuery.sizeOf(context).width < 800;
     final labels = runtime == null
         ? this.labels
         : driver
@@ -204,6 +205,16 @@ class _WorkspaceState extends ConsumerState<Workspace> {
             Icons.settings_outlined,
             Icons.description_outlined,
           ];
+    final mainNav = [
+      ('Trang chủ', Icons.home_outlined, labels.indexOf('Tổng quan')),
+      ('Bán hàng', Icons.shopping_cart_outlined, labels.indexOf('Bán hàng')),
+      ('Kho', Icons.warehouse_outlined, labels.indexOf('Kho')),
+      (
+        'Công nợ',
+        Icons.account_balance_wallet_outlined,
+        labels.indexOf('Thu chi / Công nợ'),
+      ),
+    ];
     final pages = runtime == null
         ? const [
             Overview(),
@@ -216,7 +227,13 @@ class _WorkspaceState extends ConsumerState<Workspace> {
         : driver
         ? [DeliveriesPage(runtime: runtime), ConnectionPage(runtime: runtime)]
         : [
-            ReportsPage(runtime: runtime, dashboard: true),
+            ReportsPage(
+              runtime: runtime,
+              dashboard: true,
+              shortcuts: mobile
+                  ? _mobileShortcuts(context, labels, icons)
+                  : null,
+            ),
             CatalogPage(runtime: runtime),
             TradingPage(runtime: runtime),
             TradingPage(runtime: runtime, purchase: true),
@@ -281,7 +298,7 @@ class _WorkspaceState extends ConsumerState<Workspace> {
               icon: const Icon(Icons.logout),
             ),
           ],
-          if (MediaQuery.sizeOf(context).width >= 800)
+          if (!mobile)
             Padding(
               padding: EdgeInsets.all(16),
               child: Text(
@@ -290,7 +307,7 @@ class _WorkspaceState extends ConsumerState<Workspace> {
                     : '${roleLabel(runtime.actor!.role)} • ${runtime.offline ? 'Offline' : 'Đã đăng nhập'}',
               ),
             )
-          else
+          else if (runtime == null)
             const Padding(
               padding: EdgeInsets.all(12),
               child: Tooltip(
@@ -343,7 +360,35 @@ class _WorkspaceState extends ConsumerState<Workspace> {
           ],
         ),
       ),
-      drawer: MediaQuery.sizeOf(context).width < 800
+      bottomNavigationBar: mobile && runtime != null && !driver
+          ? Builder(
+              builder: (context) {
+                final selected = mainNav.indexWhere(
+                  (entry) => entry.$3 == page,
+                );
+                return NavigationBar(
+                  height: 62,
+                  selectedIndex: selected < 0 ? mainNav.length : selected,
+                  onDestinationSelected: (index) {
+                    if (index == mainNav.length) {
+                      Scaffold.of(context).openDrawer();
+                    } else {
+                      setState(() => page = mainNav[index].$3);
+                    }
+                  },
+                  destinations: [
+                    for (final (label, icon, _) in mainNav)
+                      NavigationDestination(icon: Icon(icon), label: label),
+                    const NavigationDestination(
+                      icon: Icon(Icons.more_horiz),
+                      label: 'Thêm',
+                    ),
+                  ],
+                );
+              },
+            )
+          : null,
+      drawer: mobile
           ? Drawer(
               child: SafeArea(
                 child: ListView(
@@ -373,6 +418,66 @@ class _WorkspaceState extends ConsumerState<Workspace> {
               ),
             )
           : null,
+    );
+  }
+
+  Widget _mobileShortcuts(
+    BuildContext context,
+    List<String> labels,
+    List<IconData> icons,
+  ) {
+    final shortcuts = [
+      ('Bán hàng', 'Bán hàng', Colors.blue),
+      ('Nhập hàng', 'Mua hàng', Colors.orange),
+      ('Tồn kho', 'Kho', Colors.green),
+      ('Đối tác', 'Đối tác', Colors.deepPurple),
+      ('Công nợ', 'Thu chi / Công nợ', Colors.orange),
+      ('Báo cáo', 'Báo cáo', Colors.blue),
+      ('Giao hàng', 'Giao hàng', Colors.red),
+      ('Bảo hành', 'Bảo hành', Colors.purple),
+      ('Tìm kiếm', 'Tìm kiếm', Colors.teal),
+    ];
+    return LayoutBuilder(
+      builder: (context, size) {
+        const spacing = 8.0;
+        final columns = size.maxWidth < 270 ? 2 : 3;
+        final width = (size.maxWidth - (columns - 1) * spacing) / columns;
+        return Padding(
+          padding: const EdgeInsets.only(top: 8, bottom: 16),
+          child: Wrap(
+            spacing: spacing,
+            runSpacing: spacing,
+            children: [
+              for (final (title, destination, color) in shortcuts)
+                SizedBox(
+                  width: width,
+                  height: 69,
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 3),
+                      backgroundColor: Colors.white,
+                    ),
+                    onPressed: () =>
+                        setState(() => page = labels.indexOf(destination)),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(icons[labels.indexOf(destination)], color: color),
+                        const SizedBox(height: 4),
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

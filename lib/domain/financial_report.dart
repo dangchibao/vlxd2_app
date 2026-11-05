@@ -139,7 +139,10 @@ class FinancialReport {
       if (event.kind == 'expense') {
         expenses += BigInt.from(input['amount'] as int);
       }
-      final sign = {'payment', 'deposit'}.contains(event.kind)
+      if (event.kind == 'qualityDisposition' && input['action'] == 'discard') {
+        expenses += BigInt.from(result['value'] as int);
+      }
+      final sign = {'payment', 'deposit', 'debtCollection'}.contains(event.kind)
           ? 1
           : {
               'expense',

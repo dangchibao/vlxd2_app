@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
+import 'package:pdf/pdf.dart';
 import 'package:uuid/uuid.dart';
 
 import '../data/app_runtime.dart';
@@ -82,7 +83,11 @@ class _BusinessReceiptState extends State<BusinessReceipt> {
       final bytes = await pdf;
       final status = await ReceiptPrinter(
         widget.database,
-        WindowsPrinterAdapter(),
+        WindowsPrinterAdapter(
+          format: widget.kind == 'barcodeLabel'
+              ? barcodeLabelFormat
+              : PdfPageFormat.roll80,
+        ),
       ).print(jobId: jobId, documentId: documentId, bytes: bytes);
       if (widget.requestId != null) {
         await widget.runtime!.enqueue(
@@ -144,7 +149,9 @@ class _BusinessReceiptState extends State<BusinessReceipt> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('Phiếu K80'),
+      title: Text(
+        widget.kind == 'barcodeLabel' ? 'Tem mã vạch 60 × 40 mm' : 'Phiếu K80',
+      ),
       actions: [
         if (widget.runtime != null && widget.requestId == null)
           IconButton(
@@ -179,7 +186,10 @@ class _BusinessReceiptState extends State<BusinessReceipt> {
               return PdfPreview(
                 build: (_) async => snapshot.data!,
                 allowPrinting: false,
-                allowSharing: false,
+                allowSharing: widget.kind == 'barcodeLabel',
+                initialPageFormat: widget.kind == 'barcodeLabel'
+                    ? barcodeLabelFormat
+                    : PdfPageFormat.roll80,
                 canChangeOrientation: false,
                 canChangePageFormat: false,
                 canDebug: false,

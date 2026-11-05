@@ -59,13 +59,13 @@ trạm hoặc cờ đổi mật khẩu qua màn hình này.
 
 ## Chạy ứng dụng
 
-Các bản 0.5.0 nằm trong thư mục `dist`.
+Các bản 0.6.0 nằm trong thư mục `dist`.
 
-- Windows: giải nén `VLXD-Bay-Hai-Windows-0.5.0.zip` rồi mở
+- Windows: giải nén `VLXD-Bay-Hai-Windows-0.6.0.zip` rồi mở
   `app/vlxd_bay_hai.exe`. Giữ các DLL và thư mục `data` cạnh file chạy.
-- Android: `VLXD-Bay-Hai-Android-0.5.0.apk` có chữ ký debug dành cho cài thử
+- Android: `VLXD-Bay-Hai-Android-0.6.0.apk` có chữ ký debug dành cho cài thử
   ngoài Play Store. Hỗ trợ Android API 24 trở lên.
-- iPhone: giải nén `VLXD-Bay-Hai-PWA-0.5.0.zip` lên máy chủ tĩnh HTTPS, rồi
+- iPhone: giải nén `VLXD-Bay-Hai-PWA-0.6.0.zip` lên máy chủ tĩnh HTTPS, rồi
   thêm vào màn hình chính từ Safari theo mục PWA bên dưới.
 
 Để chạy từ mã nguồn:
@@ -134,8 +134,26 @@ giá âm thầm. Báo giá chuyển đơn giữ giá snapshot đã duyệt.
   mã dự phòng có thể cần mạng lúc mở camera lần đầu. Windows nhận mã từ
   máy quét USB dạng bàn phím hoặc ô nhập tay.
 
-Đóng bản Windows cũ trên máy trạm và mở bản 0.5.0 trước khi gửi lệnh lắp bộ
+Đóng bản Windows cũ trên máy trạm và mở bản 0.6.0 trước khi gửi lệnh lắp bộ
 hay xử lý hàng lỗi từ điện thoại.
+
+## Công nợ, báo cáo kho, bảng giá và tem
+
+- Mở một dòng ở **Thu chi / Công nợ** để xem chứng từ, lịch sử trả tiền và
+  phân bổ một phiếu thu hoặc chi cho nhiều chứng từ. Quản lý nhập số tiền
+  từng dòng rồi xác nhận. Khoản chi NCC cũ theo số dư vẫn hiện trong lịch sử.
+- Chọn thời gian ở **Báo cáo → Nhập xuất tồn**. Có thể lọc kho, chuyển sang
+  từng biến động và xuất Excel. Báo cáo tách theo chất lượng hàng và dựa vào
+  lịch sử đồng bộ có trên thiết bị.
+- **Excel / Sao lưu** có mẫu và nút xuất bảng giá. Dòng để trống tên bảng
+  và số lượng là giá gốc. Nhập số lượng nếu muốn đặt giá theo mức mua.
+  Bản xem trước cho biết giá cũ và giá mới của từng dòng.
+- Trong chi tiết hàng hóa, chọn **Tem mã vạch**, mã cần in và số tem.
+  Xem trước hoặc lưu PDF 60 × 40 mm. Trên Windows có thể gửi in và xem lại
+  nhật ký. Chọn đúng khổ giấy trên driver trước khi in.
+
+Đóng bản Windows cũ trên máy trạm và mở bản 0.6.0 trước khi gửi lệnh
+phân bổ thanh toán từ thiết bị khác.
 
 ## In K80
 

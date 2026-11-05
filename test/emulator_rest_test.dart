@@ -13,6 +13,7 @@ import 'package:vlxd_bay_hai/data/firestore_rest.dart';
 import 'package:vlxd_bay_hai/data/firestore_authority_store.dart';
 import 'package:vlxd_bay_hai/data/sync_engine.dart';
 import 'package:vlxd_bay_hai/domain/operations.dart';
+import 'package:vlxd_bay_hai/domain/stock_period.dart';
 
 const enabled = bool.fromEnvironment('BAYHAI_EMULATOR_TESTS');
 void main() {
@@ -234,6 +235,43 @@ void main() {
       while (runtime.syncing) {
         await Future<void>.delayed(const Duration(milliseconds: 10));
       }
+      final paidSale =
+          sales[receipts.indexWhere((r) => r?.status == 'confirmed')];
+      final paymentId = await runtime.enqueue(
+        Operation.debtCollection,
+        'customer',
+        {
+          'amount': 5000,
+          'method': 'cash',
+          'shiftId': 'fixture-shift',
+          'allocations': [
+            {'documentId': paidSale.entityId, 'amount': 5000, 'version': 1},
+          ],
+        },
+        expectedVersion: 1,
+      );
+      while (runtime.syncing) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect((await transport.receipt(paymentId))?.status, 'confirmed');
+      final paid =
+          await (runtime.db.select(runtime.db.businessRecords)
+                ..where((row) => row.id.equals('sale:${paidSale.entityId}')))
+              .getSingle();
+      expect(jsonDecode(paid.payload)['debt'], 15000);
+      final period = StockPeriod.fromLedger(
+        await runtime.db.select(runtime.db.inboxEvents).get(),
+        await runtime.db.select(runtime.db.businessEvents).get(),
+        DateTime.now().subtract(const Duration(days: 1)),
+        DateTime.now().add(const Duration(days: 1)),
+      );
+      expect(period.missingHistory, 0);
+      final periodStock = period.balances.singleWhere(
+        (row) => row.item.position.$2 == productId,
+      );
+      expect(periodStock.incoming, BigInt.from(1000));
+      expect(periodStock.outgoing, BigInt.from(1000));
+      expect(periodStock.closing, BigInt.zero);
       final catalogId = 'catalog-$uid';
       final commandId = await runtime.enqueue(Operation.catalog, catalogId, {
         'sku': 'SYNC-$uid',

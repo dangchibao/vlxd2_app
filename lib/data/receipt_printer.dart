@@ -9,13 +9,76 @@ import '../domain/sale.dart';
 import '../domain/operations.dart';
 import 'database.dart';
 
+const barcodeLabelFormat = PdfPageFormat(
+  60 * PdfPageFormat.mm,
+  40 * PdfPageFormat.mm,
+  marginAll: 4 * PdfPageFormat.mm,
+);
+
+bool validLabelCode(String code) => RegExp(r'^[!-~]{1,32}$').hasMatch(code);
+
 class ReceiptRenderer {
+  Future<Uint8List> renderLabel(Map<String, dynamic> data) async {
+    final code = textField(data, 'labelCode');
+    if (!validLabelCode(code)) {
+      throw const FormatException('Mã tem cần 1–32 ký tự ASCII liền nhau.');
+    }
+    final copies = integerField(data, 'copies', min: 1, max: 100);
+    final font = pw.Font.ttf(
+      await rootBundle.load('assets/fonts/NotoSans-Regular.ttf'),
+    );
+    final document = pw.Document(
+      theme: pw.ThemeData.withFont(base: font, bold: font),
+    );
+    for (var i = 0; i < copies; i++) {
+      document.addPage(
+        pw.Page(
+          pageFormat: barcodeLabelFormat,
+          build: (_) => pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            children: [
+              pw.Center(
+                child: pw.Text(
+                  'VLXD BẢY HẢI',
+                  style: const pw.TextStyle(fontSize: 10),
+                ),
+              ),
+              pw.Center(
+                child: pw.Text(
+                  textField(data, 'name'),
+                  maxLines: 1,
+                  style: const pw.TextStyle(fontSize: 9),
+                ),
+              ),
+              pw.SizedBox(height: 4),
+              pw.BarcodeWidget(
+                barcode: pw.Barcode.code128(),
+                data: code,
+                height: 43,
+                textStyle: const pw.TextStyle(fontSize: 8),
+              ),
+              pw.SizedBox(height: 3),
+              pw.Center(
+                child: pw.Text(
+                  "${NumberFormat.decimalPattern('vi').format(integerField(data, 'price'))} đ / ${data['unit']}",
+                  style: const pw.TextStyle(fontSize: 9),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return document.save();
+  }
+
   /// Uses immutable posted line snapshots, never the current catalog prices.
   Future<Uint8List> renderDocument({
     required String kind,
     required Map<String, dynamic> data,
     bool copy = false,
   }) async {
+    if (kind == 'barcodeLabel') return renderLabel(data);
     final title = switch (kind) {
       'sale' => 'PHIẾU BÁN HÀNG',
       'quote' => 'BÁO GIÁ',
@@ -377,10 +440,13 @@ abstract interface class PrinterAdapter {
 }
 
 class WindowsPrinterAdapter implements PrinterAdapter {
+  final PdfPageFormat format;
+  const WindowsPrinterAdapter({this.format = PdfPageFormat.roll80});
+
   @override
   Future<bool> send(Uint8List pdf) => Printing.layoutPdf(
-    name: 'Phiếu VLXD Bảy Hải',
-    format: PdfPageFormat.roll80,
+    name: 'VLXD Bảy Hải',
+    format: format,
     onLayout: (_) async => pdf,
   );
 }
