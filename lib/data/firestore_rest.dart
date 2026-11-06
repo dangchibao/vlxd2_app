@@ -4,6 +4,8 @@ import 'package:http/http.dart' as http;
 
 import 'firebase_auth_rest.dart';
 
+import 'package:flutter/foundation.dart';
+
 class FirestoreFailure implements Exception {
   final int status;
   const FirestoreFailure(this.status);
@@ -128,7 +130,25 @@ class FirestoreRest {
       final response = await http.Response.fromStream(
         await client.send(request).timeout(const Duration(seconds: 25)),
       );
+
       if (response.statusCode < 200 || response.statusCode >= 300) {
+        debugPrint('[VLXD] HTTP FAILED: ${response.statusCode}');
+        debugPrint('[VLXD] HTTP method: $method');
+        debugPrint('[VLXD] HTTP path: $path');
+
+        try {
+          final decoded = jsonDecode(response.body);
+          if (decoded is Map<String, dynamic>) {
+            final details = decoded['error'];
+            if (details is Map<String, dynamic>) {
+              debugPrint('[VLXD] Firebase status: ${details['status']}');
+              debugPrint('[VLXD] Firebase message: ${details['message']}');
+            }
+          }
+        } catch (_) {
+          debugPrint('[VLXD] Khong doc duoc chi tiet loi HTTP');
+        }
+
         throw FirestoreFailure(response.statusCode);
       }
       return response.body.isEmpty

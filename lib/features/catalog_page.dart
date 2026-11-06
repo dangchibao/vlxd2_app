@@ -413,6 +413,9 @@ class _CatalogEditorState extends State<CatalogEditor> {
         data,
         expectedVersion: widget.row?.version ?? 0,
       );
+
+      debugPrint('[VLXD] Da tiep nhan yeu cau hang hoa: ${data['sku']}');
+
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
@@ -465,170 +468,361 @@ class _CatalogEditorState extends State<CatalogEditor> {
       ),
     ),
   );
+
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: Text(widget.row == null ? 'Thêm hàng hóa' : 'Sửa hàng hóa'),
-    ),
-    body: ListView(
+  Widget build(BuildContext context) {
+    // Khu vực chọn ảnh sản phẩm.
+    final imagePanel = Container(
       padding: const EdgeInsets.all(20),
-      children: [
-        field('sku', 'SKU', enabled: widget.row == null),
-        field('name', 'Tên hàng'),
-        field('unit', 'Đơn vị gốc', enabled: widget.row == null),
-        field('price', 'Giá bán gốc (VND)'),
-        field('group', 'Nhóm hàng (nhập tên mới để tạo)'),
-        field(
-          'barcode',
-          'Mã vạch',
-          suffixIcon: BarcodeScanButton(
-            enabled: !busy,
-            onScan: (code) => fields['barcode']!.text = code,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFD8E5F7)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Hình ảnh sản phẩm',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF14243C),
+            ),
           ),
+          const SizedBox(height: 16),
+          ValueListenableBuilder(
+            valueListenable: fields['imageUrl']!,
+            builder: (context, value, _) {
+              return Column(
+                children: [
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF3F7FF),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: ProductPhoto(value.text, size: 180),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  PopupMenuButton<String>(
+                    enabled: !busy,
+                    onSelected: (selected) {
+                      fields['imageUrl']!.text = selected;
+                    },
+                    itemBuilder: (context) => [
+                      for (final entry in sampleImages.entries)
+                        PopupMenuItem(
+                          value: entry.key,
+                          child: Row(
+                            children: [
+                              ProductPhoto(entry.key, size: 28),
+                              const SizedBox(width: 10),
+                              Flexible(child: Text(entry.value)),
+                            ],
+                          ),
+                        ),
+                      const PopupMenuItem(value: '', child: Text('Bỏ ảnh')),
+                    ],
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEAF2FF),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.add_photo_alternate_outlined,
+                            color: Color(0xFF0059D6),
+                          ),
+                          SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              'Chọn ảnh minh họa',
+                              style: TextStyle(
+                                color: Color(0xFF0059D6),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 16),
+          field(
+            'imageUrl',
+            'Ảnh sản phẩm',
+            help: 'Dán đường dẫn HTTPS hoặc chọn ảnh minh họa có sẵn.',
+          ),
+        ],
+      ),
+    );
+
+    // Các trường thông tin chính.
+    final mainFields = <Widget>[
+      field('sku', 'SKU', enabled: widget.row == null),
+      field('name', 'Tên hàng'),
+      field('group', 'Nhóm hàng (nhập tên mới để tạo)'),
+      field('unit', 'Đơn vị gốc', enabled: widget.row == null),
+      field('price', 'Giá bán gốc (VND)'),
+      field('model', 'Model / Quy cách'),
+      field('brand', 'Thương hiệu'),
+      field(
+        'barcode',
+        'Mã vạch',
+        suffixIcon: BarcodeScanButton(
+          enabled: !busy,
+          onScan: (code) => fields['barcode']!.text = code,
         ),
-        field('brand', 'Thương hiệu'),
-        field('model', 'Model'),
-        field('variantOf', 'SKU sản phẩm gốc (nếu là biến thể)'),
-        ValueListenableBuilder(
-          valueListenable: fields['imageUrl']!,
-          builder: (context, value, _) => Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                ProductPhoto(value.text, size: 96),
-                PopupMenuButton<String>(
-                  enabled: !busy,
-                  onSelected: (selected) => fields['imageUrl']!.text = selected,
-                  itemBuilder: (context) => [
-                    for (final entry in sampleImages.entries)
-                      PopupMenuItem(
-                        value: entry.key,
-                        child: Row(
-                          children: [
-                            ProductPhoto(entry.key, size: 28),
-                            const SizedBox(width: 10),
-                            Text(entry.value),
-                          ],
+      ),
+      field('variantOf', 'SKU sản phẩm gốc (nếu là biến thể)'),
+    ];
+
+    // Các trường nâng cao, giữ nguyên logic hiện tại.
+    final advancedFields = <Widget>[
+      field('minimumStock', 'Tồn tối thiểu theo đơn vị gốc'),
+      field(
+        'warrantyDays',
+        'Thời hạn bảo hành (ngày)',
+        help: 'Nhập 0 nếu chưa quy định. Đơn bán giữ thời hạn tại lúc ghi sổ.',
+      ),
+      field(
+        'components',
+        'Thành phần cho một bộ',
+        lines: 3,
+        help: 'Mỗi dòng nhập Mã hàng=Số lượng gốc. Ví dụ ONG25=2.',
+      ),
+      DropdownButtonFormField<String>(
+        initialValue: tracking,
+        decoration: const InputDecoration(labelText: 'Theo dõi tồn'),
+        items: const [
+          DropdownMenuItem(value: 'none', child: Text('Số lượng')),
+          DropdownMenuItem(value: 'lot', child: Text('Lô / Mã màu')),
+          DropdownMenuItem(value: 'serial', child: Text('Serial thiết bị')),
+        ],
+        onChanged: busy || widget.row != null
+            ? null
+            : (v) => setState(() => tracking = v!),
+      ),
+      SwitchListTile(
+        title: const Text('Đang kinh doanh'),
+        value: active,
+        onChanged: busy ? null : (v) => setState(() => active = v),
+      ),
+      field(
+        'units',
+        'Đơn vị quy đổi',
+        lines: 3,
+        help: 'Mỗi dòng: Thùng=12 (1 thùng bằng 12 đơn vị gốc).',
+      ),
+      field(
+        'priceLists',
+        'Bảng giá theo nhóm khách',
+        lines: 3,
+        help: 'Mỗi dòng: Đại lý=150000. Giá cho một đơn vị gốc.',
+      ),
+      field(
+        'quantityTiers',
+        'Giá theo số lượng',
+        lines: 3,
+        help: 'Mỗi dòng: Đại lý;10;140000 hoặc ;10;145000.',
+      ),
+      field(
+        'attributes',
+        'Thuộc tính theo nhóm',
+        lines: 3,
+        help: 'Mỗi dòng: Kích thước=60x60 hoặc Màu=Trắng.',
+      ),
+      DropdownButtonFormField<String>(
+        initialValue: taxTreatment,
+        decoration: const InputDecoration(
+          labelText: 'Phân loại thuế để chuẩn bị tích hợp',
+        ),
+        items: const [
+          DropdownMenuItem(value: '', child: Text('Chưa cấu hình')),
+          DropdownMenuItem(
+            value: 'rate',
+            child: Text('Theo thuế suất cấu hình'),
+          ),
+          DropdownMenuItem(
+            value: 'exempt',
+            child: Text('Miễn thuế theo cấu hình'),
+          ),
+          DropdownMenuItem(
+            value: 'outsideScope',
+            child: Text('Ngoài phạm vi theo cấu hình'),
+          ),
+        ],
+        onChanged: busy ? null : (v) => setState(() => taxTreatment = v!),
+      ),
+      if (taxTreatment == 'rate')
+        field(
+          'taxRate',
+          'Thuế suất (%)',
+          help: 'Nhập theo cấu hình đã được cửa hàng xác minh.',
+        ),
+      field(
+        'accessories',
+        'SKU phụ kiện tương thích',
+        help: 'Ngăn cách bằng dấu phẩy.',
+      ),
+      field(
+        'alternatives',
+        'SKU sản phẩm thay thế',
+        help: 'Ngăn cách bằng dấu phẩy.',
+      ),
+    ];
+
+    // Tự động chia trường nhập thành 1 hoặc 2 cột.
+    Widget responsiveFields(List<Widget> items) {
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final twoColumns = constraints.maxWidth >= 600;
+          final itemWidth = twoColumns
+              ? (constraints.maxWidth - 16) / 2
+              : constraints.maxWidth;
+
+          return Wrap(
+            spacing: 16,
+            runSpacing: 4,
+            children: [
+              for (final item in items) SizedBox(width: itemWidth, child: item),
+            ],
+          );
+        },
+      );
+    }
+
+    // Khung thông tin chính.
+    final informationPanel = Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFD8E5F7)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Thông tin hàng hóa',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF14243C),
+            ),
+          ),
+          const SizedBox(height: 20),
+          responsiveFields(mainFields),
+        ],
+      ),
+    );
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.row == null ? 'Thêm hàng hóa' : 'Sửa hàng hóa'),
+      ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isDesktop = constraints.maxWidth >= 900;
+
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1200),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (isDesktop)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SizedBox(width: 290, child: imagePanel),
+                          const SizedBox(width: 20),
+                          Expanded(child: informationPanel),
+                        ],
+                      )
+                    else ...[
+                      imagePanel,
+                      const SizedBox(height: 20),
+                      informationPanel,
+                    ],
+                    const SizedBox(height: 20),
+
+                    // Thông tin nâng cao.
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFD8E5F7)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Thiết lập nâng cao',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF14243C),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          responsiveFields(advancedFields),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    if (error.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Text(
+                          error,
+                          style: const TextStyle(color: Colors.red),
                         ),
                       ),
-                    const PopupMenuItem(value: '', child: Text('Bỏ ảnh')),
+
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        OutlinedButton(
+                          onPressed: busy
+                              ? null
+                              : () => Navigator.of(context).maybePop(),
+                          child: const Text('Hủy'),
+                        ),
+                        const SizedBox(width: 12),
+                        FilledButton.icon(
+                          onPressed: busy ? null : save,
+                          icon: const Icon(Icons.save_outlined),
+                          label: const Text('Lưu chờ xác nhận'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
                   ],
-                  child: const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: Text('Chọn ảnh minh họa ▾'),
-                  ),
                 ),
-              ],
+              ),
             ),
-          ),
-        ),
-        field(
-          'imageUrl',
-          'Ảnh sản phẩm',
-          help: 'Dán đường dẫn HTTPS hoặc chọn ảnh minh họa có sẵn.',
-        ),
-        field('minimumStock', 'Tồn tối thiểu theo đơn vị gốc'),
-        field(
-          'warrantyDays',
-          'Thời hạn bảo hành (ngày)',
-          help:
-              'Nhập 0 nếu chưa quy định. Đơn bán giữ thời hạn tại lúc ghi sổ.',
-        ),
-        field(
-          'components',
-          'Thành phần cho một bộ',
-          lines: 3,
-          help: 'Mỗi dòng nhập Mã hàng=Số lượng gốc. Ví dụ ONG25=2. Để trống với hàng thường.',
-        ),
-        DropdownButtonFormField<String>(
-          initialValue: tracking,
-          decoration: const InputDecoration(labelText: 'Theo dõi tồn'),
-          items: const [
-            DropdownMenuItem(value: 'none', child: Text('Số lượng')),
-            DropdownMenuItem(value: 'lot', child: Text('Lô / Mã màu')),
-            DropdownMenuItem(value: 'serial', child: Text('Serial thiết bị')),
-          ],
-          onChanged: busy || widget.row != null
-              ? null
-              : (v) => setState(() => tracking = v!),
-        ),
-        SwitchListTile(
-          title: const Text('Đang kinh doanh'),
-          value: active,
-          onChanged: busy ? null : (v) => setState(() => active = v),
-        ),
-        field(
-          'units',
-          'Đơn vị quy đổi',
-          lines: 3,
-          help: 'Mỗi dòng: Thùng=12 (1 thùng bằng 12 đơn vị gốc).',
-        ),
-        field(
-          'priceLists',
-          'Bảng giá theo nhóm khách',
-          lines: 3,
-          help: 'Mỗi dòng: Đại lý=150000. Giá cho một đơn vị gốc; chọn cùng tên bảng ở khách hàng.',
-        ),
-        field(
-          'quantityTiers',
-          'Giá theo số lượng',
-          lines: 3,
-          help: 'Mỗi dòng: Đại lý;10;140000 hoặc ;10;145000 cho bảng giá chung. Số lượng theo đơn vị gốc.',
-        ),
-        field(
-          'attributes',
-          'Thuộc tính theo nhóm',
-          lines: 3,
-          help: 'Mỗi dòng: Kích thước=60x60 hoặc Màu=Trắng.',
-        ),
-        DropdownButtonFormField<String>(
-          initialValue: taxTreatment,
-          decoration: const InputDecoration(
-            labelText: 'Phân loại thuế để chuẩn bị tích hợp',
-          ),
-          items: const [
-            DropdownMenuItem(value: '', child: Text('Chưa cấu hình')),
-            DropdownMenuItem(
-              value: 'rate',
-              child: Text('Theo thuế suất cấu hình'),
-            ),
-            DropdownMenuItem(
-              value: 'exempt',
-              child: Text('Miễn thuế theo cấu hình'),
-            ),
-            DropdownMenuItem(
-              value: 'outsideScope',
-              child: Text('Ngoài phạm vi theo cấu hình'),
-            ),
-          ],
-          onChanged: busy ? null : (v) => setState(() => taxTreatment = v!),
-        ),
-        if (taxTreatment == 'rate')
-          field(
-            'taxRate',
-            'Thuế suất (%)',
-            help: 'Nhập theo cấu hình đã được cửa hàng xác minh; phần mềm không tự chọn mức thuế.',
-          ),
-        field(
-          'accessories',
-          'SKU phụ kiện tương thích',
-          help: 'Ngăn cách bằng dấu phẩy.',
-        ),
-        field(
-          'alternatives',
-          'SKU sản phẩm thay thế',
-          help: 'Ngăn cách bằng dấu phẩy.',
-        ),
-        if (error.isNotEmpty)
-          Text(error, style: const TextStyle(color: Colors.red)),
-        FilledButton(
-          onPressed: busy ? null : save,
-          child: const Text('Lưu chờ xác nhận'),
-        ),
-      ],
-    ),
-  );
+          );
+        },
+      ),
+    );
+  }
 }

@@ -32,6 +32,9 @@ abstract final class BayHaiStyle {
       borderSide: const BorderSide(color: border),
     );
     return ThemeData(
+      fontFamily: 'Roboto',
+      visualDensity: VisualDensity.standard,
+      dividerColor: BayHaiStyle.border,
       useMaterial3: true,
       colorScheme: scheme,
       scaffoldBackgroundColor: canvas,

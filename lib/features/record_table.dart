@@ -125,6 +125,31 @@ class RecordTable extends StatelessWidget {
   Widget cell(BusinessRecord row, Map<String, dynamic> data, String key) {
     final value = key == 'partyName' ? data[key] ?? data['id'] : data[key];
     if (key == 'imageUrl') return ProductPhoto(value, size: 40);
+
+    if (kind == 'catalog' && key == 'sku') {
+      return Text(
+        '${value ?? '—'}',
+        style: const TextStyle(
+          fontWeight: FontWeight.w700,
+          color: Color(0xFF0059D6),
+        ),
+      );
+    }
+
+    if (kind == 'catalog' && key == 'name') {
+      return ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 240),
+        child: Text(
+          '${value ?? '—'}',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF162B4A),
+          ),
+        ),
+      );
+    }
     if (key == 'productId' && value is String) {
       final db = runtime.db;
       return FutureBuilder(
@@ -148,10 +173,11 @@ class RecordTable extends StatelessWidget {
       return Text(
         value is int ? vnd(value) : '—',
         style: TextStyle(
-          color: key == 'debt' && value is int && value > 0
+          color: kind == 'catalog' && key == 'price'
+              ? const Color(0xFF0059D6)
+              : key == 'debt' && value is int && value > 0
               ? Colors.orange.shade900
               : null,
-          fontWeight: FontWeight.w600,
         ),
       );
     }
@@ -208,36 +234,58 @@ class RecordTable extends StatelessWidget {
     ),
   );
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, size) => SingleChildScrollView(
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(minWidth: size.maxWidth),
-          child: DataTable(
-            showCheckboxColumn: false,
-            columnSpacing: 22,
-            horizontalMargin: 16,
-            headingRowColor: const WidgetStatePropertyAll(Color(0xffe7effc)),
-            headingTextStyle: const TextStyle(
-              fontWeight: FontWeight.bold,
-              color: Color(0xff003c94),
-            ),
-            dataRowMinHeight: 52,
-            dataRowMaxHeight: 68,
-            columns: [
-              for (final c in columns) DataColumn(label: Text(c.$2)),
-              const DataColumn(label: Text('Thao tác')),
-            ],
-            rows: [
-              for (var i = 0; i < rows.length; i++)
-                buildRow(context, rows[i], i),
-            ],
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, size) {
+        return Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFD8E5F7)),
           ),
-        ),
-      ),
-    ),
-  );
+          clipBehavior: Clip.antiAlias,
+          child: SingleChildScrollView(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minWidth: size.maxWidth),
+                child: DataTable(
+                  showCheckboxColumn: false,
+                  dividerThickness: 0.6,
+                  columnSpacing: 28,
+                  horizontalMargin: 20,
+                  headingRowHeight: 54,
+                  headingRowColor: const WidgetStatePropertyAll(
+                    Color(0xFFE8F1FF),
+                  ),
+                  headingTextStyle: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF12386D),
+                  ),
+                  dataTextStyle: const TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFF1D2C43),
+                  ),
+                  dataRowMinHeight: 52,
+                  dataRowMaxHeight: 68,
+                  columns: [
+                    for (final c in columns) DataColumn(label: Text(c.$2)),
+                    const DataColumn(label: Text('Thao tác')),
+                  ],
+                  rows: [
+                    for (var i = 0; i < rows.length; i++)
+                      buildRow(context, rows[i], i),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   DataRow buildRow(BuildContext context, BusinessRecord row, int index) {
     final data = recordData(row);
     return DataRow(
