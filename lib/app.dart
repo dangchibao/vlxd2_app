@@ -11,6 +11,8 @@ import 'data/database.dart';
 import 'data/app_runtime.dart';
 import 'features/login_gate.dart';
 import 'features/brand_mark.dart';
+import 'features/bayhai_style.dart';
+import 'features/mobile_home.dart';
 import 'features/catalog_art.dart';
 import 'features/business_pages.dart';
 import 'features/reports_search.dart';
@@ -96,23 +98,7 @@ class BayHaiApp extends StatelessWidget {
     title: 'VLXD Bảy Hải',
     debugShowCheckedModeBanner: false,
     routerConfig: router,
-    theme: ThemeData(
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: const Color(0xff0059df),
-        primary: const Color(0xff0055d9),
-      ),
-      scaffoldBackgroundColor: const Color(0xfff2f6fd),
-      useMaterial3: true,
-      inputDecorationTheme: const InputDecorationTheme(
-        border: OutlineInputBorder(),
-        isDense: true,
-      ),
-      filledButtonTheme: FilledButtonThemeData(
-        style: FilledButton.styleFrom(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-        ),
-      ),
-    ),
+    theme: BayHaiStyle.theme,
   );
 }
 
@@ -124,6 +110,12 @@ class Workspace extends ConsumerStatefulWidget {
 
 class _WorkspaceState extends ConsumerState<Workspace> {
   int page = 0;
+  bool showMore = false;
+
+  void go(int index) => setState(() {
+    page = index;
+    showMore = false;
+  });
   final labels = [
     'Tổng quan',
     'Hàng hóa',
@@ -145,6 +137,7 @@ class _WorkspaceState extends ConsumerState<Workspace> {
     final runtime = SessionScope.maybeOf(context);
     final driver = runtime?.actor?.role == StaffRole.driver;
     final mobile = MediaQuery.sizeOf(context).width < 800;
+    final mobileShell = mobile && runtime != null && !driver;
     final labels = runtime == null
         ? this.labels
         : driver
@@ -174,6 +167,11 @@ class _WorkspaceState extends ConsumerState<Workspace> {
             'Yêu cầu / Nhật ký in',
             'Thiết lập',
             'Chứng từ',
+            if (mobileShell) ...[
+              'Khách hàng',
+              'Nhà cung cấp',
+              'Tổng quan cửa hàng',
+            ],
           ];
     final icons = runtime == null
         ? this.icons
@@ -204,6 +202,11 @@ class _WorkspaceState extends ConsumerState<Workspace> {
             Icons.print_outlined,
             Icons.settings_outlined,
             Icons.description_outlined,
+            if (mobileShell) ...[
+              Icons.person_outline,
+              Icons.store_outlined,
+              Icons.analytics_outlined,
+            ],
           ];
     final mainNav = [
       ('Trang chủ', Icons.home_outlined, labels.indexOf('Tổng quan')),
@@ -227,18 +230,103 @@ class _WorkspaceState extends ConsumerState<Workspace> {
         : driver
         ? [DeliveriesPage(runtime: runtime), ConnectionPage(runtime: runtime)]
         : [
-            ReportsPage(
-              runtime: runtime,
-              dashboard: true,
-              shortcuts: mobile
-                  ? _mobileShortcuts(context, labels, icons)
-                  : null,
-            ),
+            if (mobileShell)
+              MobileHome(
+                runtime: runtime,
+                overview: () => go(labels.indexOf('Tổng quan cửa hàng')),
+                shortcuts: [
+                  for (final (label, destination, icon, color) in const [
+                    (
+                      'Bán hàng',
+                      'Bán hàng',
+                      Icons.shopping_bag_outlined,
+                      BayHaiStyle.primary,
+                    ),
+                    (
+                      'Nhập hàng',
+                      'Mua hàng',
+                      Icons.inventory_2_outlined,
+                      BayHaiStyle.orange,
+                    ),
+                    (
+                      'Tồn kho',
+                      'Kho',
+                      Icons.warehouse_outlined,
+                      BayHaiStyle.green,
+                    ),
+                    (
+                      'Khách hàng',
+                      'Khách hàng',
+                      Icons.people_outline,
+                      BayHaiStyle.purple,
+                    ),
+                    (
+                      'Nhà cung cấp',
+                      'Nhà cung cấp',
+                      Icons.store_outlined,
+                      BayHaiStyle.primary,
+                    ),
+                    (
+                      'Công nợ',
+                      'Thu chi / Công nợ',
+                      Icons.payments_outlined,
+                      BayHaiStyle.orange,
+                    ),
+                    (
+                      'Báo cáo',
+                      'Báo cáo',
+                      Icons.bar_chart_rounded,
+                      BayHaiStyle.primary,
+                    ),
+                    (
+                      'Giao hàng',
+                      'Giao hàng',
+                      Icons.local_shipping_outlined,
+                      BayHaiStyle.red,
+                    ),
+                    (
+                      'Bảo hành',
+                      'Bảo hành',
+                      Icons.verified_user_outlined,
+                      BayHaiStyle.purple,
+                    ),
+                  ])
+                    (label, icon, color, () => go(labels.indexOf(destination))),
+                ],
+              )
+            else
+              ReportsPage(runtime: runtime, dashboard: true),
             CatalogPage(runtime: runtime),
             TradingPage(runtime: runtime),
             TradingPage(runtime: runtime, purchase: true),
             PartiesPage(runtime: runtime),
-            StockPage(runtime: runtime),
+            if (mobileShell)
+              DefaultTabController(
+                length: 3,
+                child: Column(
+                  children: [
+                    const TabBar(
+                      tabs: [
+                        Tab(text: 'Tồn kho'),
+                        Tab(text: 'Sản phẩm'),
+                        Tab(text: 'Lô / Serial'),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Expanded(
+                      child: TabBarView(
+                        children: [
+                          StockPage(runtime: runtime),
+                          CatalogPage(runtime: runtime),
+                          TrackingPage(runtime: runtime),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              StockPage(runtime: runtime),
             FinancePage(runtime: runtime),
             WarrantiesPage(runtime: runtime),
             ConnectionPage(runtime: runtime),
@@ -257,26 +345,77 @@ class _WorkspaceState extends ConsumerState<Workspace> {
             PrintJobsPage(runtime: runtime),
             SettingsPage(runtime: runtime),
             DocumentsPage(runtime: runtime),
+            if (mobileShell) ...[
+              PartiesPage(runtime: runtime, partyType: 'customer'),
+              PartiesPage(runtime: runtime, partyType: 'supplier'),
+              ReportsPage(runtime: runtime, dashboard: true),
+            ],
           ];
     if (page >= pages.length) page = 0;
-    final content = KeyedSubtree(key: ValueKey(page), child: pages[page]);
+    final more = mobileShell && showMore;
+    const pinned = [
+      'Nhân viên',
+      'Excel / Sao lưu',
+      'Đồng bộ / Trạm',
+      'Thiết lập',
+      'Yêu cầu / Nhật ký in',
+      'Chứng từ',
+    ];
+    final content = runtime != null && more
+        ? MobileMore(
+            runtime: runtime,
+            actions: [
+              for (final label in pinned)
+                (
+                  label,
+                  icons[labels.indexOf(label)],
+                  () => go(labels.indexOf(label)),
+                ),
+              for (var i = 1; i < labels.length; i++)
+                if (!pinned.contains(labels[i]))
+                  (labels[i], icons[i], () => go(i)),
+            ],
+          )
+        : KeyedSubtree(key: ValueKey(page), child: pages[page]);
+    final mobileTitle = more
+        ? 'Thêm'
+        : page == 0
+        ? 'VLXD Bảy Hải'
+        : labels[page];
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xff0055d9),
+        backgroundColor: BayHaiStyle.navy,
         foregroundColor: Colors.white,
-        title: const Row(
-          children: [
-            BrandMark(size: 30, roofColor: Colors.white),
-            SizedBox(width: 10),
-            Flexible(
-              child: Text(
-                'VLXD Bảy Hải',
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontWeight: FontWeight.bold),
+        centerTitle: mobileShell,
+        automaticallyImplyLeading: !mobileShell,
+        leading: mobileShell && (more || page != 0)
+            ? IconButton(
+                tooltip: 'Về trang chủ',
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => go(0),
+              )
+            : null,
+        title: mobileShell && (more || page != 0)
+            ? Text(
+                mobileTitle,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              )
+            : const Row(
+                children: [
+                  BrandMark(size: 30, roofColor: Colors.white),
+                  SizedBox(width: 10),
+                  Flexible(
+                    child: Text(
+                      'VLXD Bảy Hải',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ],
-        ),
         actions: [
           if (runtime == null)
             IconButton(
@@ -292,11 +431,12 @@ class _WorkspaceState extends ConsumerState<Workspace> {
                 runtime.offline ? Icons.cloud_off_outlined : Icons.sync,
               ),
             ),
-            IconButton(
-              tooltip: 'Đăng xuất',
-              onPressed: runtime.logout,
-              icon: const Icon(Icons.logout),
-            ),
+            if (!mobileShell)
+              IconButton(
+                tooltip: 'Đăng xuất',
+                onPressed: runtime.logout,
+                icon: const Icon(Icons.logout),
+              ),
           ],
           if (!mobile)
             Padding(
@@ -347,20 +487,27 @@ class _WorkspaceState extends ConsumerState<Workspace> {
                       ),
                       child: const Text('Giấy phép phần mềm'),
                     ),
-                    const Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Text('Bản phát triển\nChưa dùng ghi sổ thực tế'),
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        runtime == null
+                            ? 'Chế độ xem thử cục bộ'
+                            : 'VLXD Bảy Hải 1.0.0',
+                      ),
                     ),
                   ],
                 ),
               ),
             Expanded(
-              child: Padding(padding: const EdgeInsets.all(20), child: content),
+              child: Padding(
+                padding: EdgeInsets.all(mobileShell ? 12 : 20),
+                child: content,
+              ),
             ),
           ],
         ),
       ),
-      bottomNavigationBar: mobile && runtime != null && !driver
+      bottomNavigationBar: mobileShell
           ? Builder(
               builder: (context) {
                 final selected = mainNav.indexWhere(
@@ -368,12 +515,14 @@ class _WorkspaceState extends ConsumerState<Workspace> {
                 );
                 return NavigationBar(
                   height: 62,
-                  selectedIndex: selected < 0 ? mainNav.length : selected,
+                  selectedIndex: more || selected < 0
+                      ? mainNav.length
+                      : selected,
                   onDestinationSelected: (index) {
                     if (index == mainNav.length) {
-                      Scaffold.of(context).openDrawer();
+                      setState(() => showMore = true);
                     } else {
-                      setState(() => page = mainNav[index].$3);
+                      go(mainNav[index].$3);
                     }
                   },
                   destinations: [
@@ -388,7 +537,7 @@ class _WorkspaceState extends ConsumerState<Workspace> {
               },
             )
           : null,
-      drawer: mobile
+      drawer: mobile && !mobileShell
           ? Drawer(
               child: SafeArea(
                 child: ListView(
@@ -418,66 +567,6 @@ class _WorkspaceState extends ConsumerState<Workspace> {
               ),
             )
           : null,
-    );
-  }
-
-  Widget _mobileShortcuts(
-    BuildContext context,
-    List<String> labels,
-    List<IconData> icons,
-  ) {
-    final shortcuts = [
-      ('Bán hàng', 'Bán hàng', Colors.blue),
-      ('Nhập hàng', 'Mua hàng', Colors.orange),
-      ('Tồn kho', 'Kho', Colors.green),
-      ('Đối tác', 'Đối tác', Colors.deepPurple),
-      ('Công nợ', 'Thu chi / Công nợ', Colors.orange),
-      ('Báo cáo', 'Báo cáo', Colors.blue),
-      ('Giao hàng', 'Giao hàng', Colors.red),
-      ('Bảo hành', 'Bảo hành', Colors.purple),
-      ('Tìm kiếm', 'Tìm kiếm', Colors.teal),
-    ];
-    return LayoutBuilder(
-      builder: (context, size) {
-        const spacing = 8.0;
-        final columns = size.maxWidth < 270 ? 2 : 3;
-        final width = (size.maxWidth - (columns - 1) * spacing) / columns;
-        return Padding(
-          padding: const EdgeInsets.only(top: 8, bottom: 16),
-          child: Wrap(
-            spacing: spacing,
-            runSpacing: spacing,
-            children: [
-              for (final (title, destination, color) in shortcuts)
-                SizedBox(
-                  width: width,
-                  height: 69,
-                  child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 3),
-                      backgroundColor: Colors.white,
-                    ),
-                    onPressed: () =>
-                        setState(() => page = labels.indexOf(destination)),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(icons[labels.indexOf(destination)], color: color),
-                        const SizedBox(height: 4),
-                        Text(
-                          title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        );
-      },
     );
   }
 }

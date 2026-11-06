@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:async';
 
+import 'package:drift/drift.dart' show Variable;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
@@ -97,7 +98,7 @@ void feedback(BuildContext context, String text) {
 class RecordList extends StatefulWidget {
   final AppRuntime runtime;
   final String kind, title;
-  final String? onlyId;
+  final String? onlyId, partyType;
   final List<Widget> actions;
   final Widget Function(BuildContext, BusinessRecord, Map<String, dynamic>)
   item;
@@ -109,6 +110,7 @@ class RecordList extends StatefulWidget {
     required this.item,
     this.actions = const [],
     this.onlyId,
+    this.partyType,
   });
   @override
   State<RecordList> createState() => _RecordListState();
@@ -130,7 +132,8 @@ class _RecordListState extends State<RecordList> {
     super.didUpdateWidget(old);
     if (old.kind != widget.kind ||
         old.runtime != widget.runtime ||
-        old.onlyId != widget.onlyId) {
+        old.onlyId != widget.onlyId ||
+        old.partyType != widget.partyType) {
       page = 0;
       refresh();
     }
@@ -143,6 +146,7 @@ class _RecordListState extends State<RecordList> {
       limit: 101,
       search: search,
       recordId: widget.onlyId,
+      partyType: widget.partyType,
     );
   }
 
@@ -464,7 +468,8 @@ String currentShift(AppRuntime runtime) =>
 
 class PartiesPage extends StatelessWidget {
   final AppRuntime runtime;
-  const PartiesPage({super.key, required this.runtime});
+  final String? partyType;
+  const PartiesPage({super.key, required this.runtime, this.partyType});
   Future<void> edit(
     BuildContext context, {
     BusinessRecord? row,
@@ -481,7 +486,7 @@ class PartiesPage extends StatelessWidget {
       InputField(
         'type',
         'Loại đối tác',
-        initial: data['type'] as String? ?? 'customer',
+        initial: data['type'] as String? ?? partyType ?? 'customer',
         choices: runtime.actor?.role == StaffRole.sales
             ? [('customer', 'Khách hàng')]
             : [
@@ -514,9 +519,15 @@ class PartiesPage extends StatelessWidget {
   Widget build(BuildContext context) => RecordList(
     runtime: runtime,
     kind: 'party',
-    title: 'Khách hàng / Nhà cung cấp',
+    title: switch (partyType) {
+      'customer' => 'Khách hàng',
+      'supplier' => 'Nhà cung cấp',
+      _ => 'Khách hàng / Nhà cung cấp',
+    },
+    partyType: partyType,
     actions: [
-      if (allowed(runtime, Operation.party))
+      if (allowed(runtime, Operation.party) &&
+          !(partyType == 'supplier' && runtime.actor?.role == StaffRole.sales))
         FilledButton.icon(
           onPressed: () => edit(context),
           icon: const Icon(Icons.add),
@@ -525,9 +536,27 @@ class PartiesPage extends StatelessWidget {
     ],
     item: (context, row, data) => Card(
       child: ListTile(
-        title: Text(data['name'] as String),
-        subtitle: Text('${data['phone'] ?? ''} • ${data['address'] ?? ''}'),
-        trailing: allowed(runtime, Operation.party)
+        leading: CircleAvatar(
+          child: Icon(
+            data['type'] == 'supplier'
+                ? Icons.store_outlined
+                : Icons.person_outline,
+          ),
+        ),
+        title: Text(
+          data['name'] as String,
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+        subtitle: Text(
+          [
+            data['phone'],
+            data['address'],
+          ].whereType<String>().where((s) => s.isNotEmpty).join(' • '),
+        ),
+        trailing:
+            allowed(runtime, Operation.party) &&
+                !(runtime.actor?.role == StaffRole.sales &&
+                    data['type'] != 'customer')
             ? IconButton(
                 icon: const Icon(Icons.edit_outlined),
                 onPressed: () => edit(context, row: row, data: data),
@@ -2244,9 +2273,101 @@ class StockPage extends StatelessWidget {
   );
 }
 
+Future<void> openExpense(
+  BuildContext context,
+  AppRuntime runtime, {
+  String? referenceKind,
+  String? referenceId,
+}) => commandDialog(
+  context,
+  runtime,
+  title: 'Phiếu chi chi phí',
+  operation: Operation.expense,
+  entityId: const Uuid().v4(),
+  fixed: {'referenceKind': ?referenceKind, 'referenceId': ?referenceId},
+  fields: [
+    const InputField('amount', 'Số tiền chi (VND)', number: true),
+    const InputField(
+      'method',
+      'Phương thức',
+      choices: [('cash', 'Tiền mặt'), ('bank', 'Chuyển khoản')],
+    ),
+    InputField('shiftId', 'Ca', initial: currentShift(runtime)),
+    const InputField('reason', 'Nội dung chi'),
+  ],
+);
+
 class DeliveriesPage extends StatelessWidget {
   final AppRuntime runtime;
   const DeliveriesPage({super.key, required this.runtime});
+
+  Future<void> tripHistory(BuildContext context, String saleId) async {
+    final rows = await runtime.db
+        .customSelect(
+          "SELECT payload FROM business_records WHERE kind = 'deliveryTrip' "
+          "AND json_extract(payload, '\$.saleId') = ? "
+          "ORDER BY json_extract(payload, '\$.deliveredAt') DESC, id DESC",
+          variables: [Variable(saleId)],
+        )
+        .get();
+    if (!context.mounted) return;
+    final trips = rows
+        .map(
+          (row) =>
+              jsonDecode(row.read<String>('payload')) as Map<String, dynamic>,
+        )
+        .toList();
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Lịch sử từng chuyến giao'),
+        content: SizedBox(
+          width: 520,
+          child: trips.isEmpty
+              ? const Text('Đơn này chưa có chuyến giao đã xác nhận.')
+              : ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: trips.length,
+                  itemBuilder: (_, index) {
+                    final trip = trips[index];
+                    return ListTile(
+                      title: Text("Chuyến ${trip['id']}"),
+                      subtitle: Text(
+                        "${trip['deliveredAt']} • Xe ${trip['vehiclePlate'] ?? trip['vehicleId']}\n"
+                        "${(trip['lines'] as List).map((line) => "${line['name'] ?? line['productId']}: ${qty(line['quantity'] as int)}").join(' • ')}",
+                      ),
+                      onTap: () => openBusinessReceipt(
+                        dialogContext,
+                        runtime,
+                        'deliveryTrip',
+                        trip,
+                      ),
+                      trailing: allowed(runtime, Operation.expense)
+                          ? IconButton(
+                              tooltip: 'Lập phiếu chi cho chuyến',
+                              icon: const Icon(Icons.payments_outlined),
+                              onPressed: () => openExpense(
+                                dialogContext,
+                                runtime,
+                                referenceKind: 'deliveryTrip',
+                                referenceId: trip['id'] as String,
+                              ),
+                            )
+                          : null,
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Đóng'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => RecordList(
     runtime: runtime,
@@ -2275,6 +2396,12 @@ class DeliveriesPage extends StatelessWidget {
                   icon: const Icon(Icons.print_outlined),
                   label: const Text('Phiếu giao'),
                 ),
+                if (runtime.actor?.role != StaffRole.driver)
+                  TextButton.icon(
+                    onPressed: () => tripHistory(context, data['id'] as String),
+                    icon: const Icon(Icons.history),
+                    label: const Text('Từng chuyến'),
+                  ),
                 if (data['latE6'] != null && data['lngE6'] != null)
                   TextButton.icon(
                     onPressed: () => Navigator.push(
@@ -2293,7 +2420,8 @@ class DeliveriesPage extends StatelessWidget {
                 contentPadding: EdgeInsets.zero,
                 title: Text(line['name'] as String),
                 subtitle: Text(
-                  'Đã giao ${qty(line['delivered'] as int)} / ${qty(line['quantity'] as int)} ${line['unit']}',
+                  'Đã giao ${qty(line['delivered'] as int)} • '
+                  'Còn giao ${qty(((line['quantity'] as int) - (line['delivered'] as int) - (line['returned'] as int? ?? 0)).clamp(0, 1000000000))} ${line['unit']}',
                 ),
               ),
             if (allowed(runtime, Operation.delivery) &&
@@ -2330,23 +2458,7 @@ class FinancePage extends StatelessWidget {
           children: [
             if (allowed(runtime, Operation.expense))
               FilledButton(
-                onPressed: () => commandDialog(
-                  context,
-                  runtime,
-                  title: 'Phiếu chi chi phí',
-                  operation: Operation.expense,
-                  entityId: const Uuid().v4(),
-                  fields: [
-                    const InputField(
-                      'amount',
-                      'Số tiền chi (VND)',
-                      number: true,
-                    ),
-                    const InputField('method', 'Phương thức', choices: methods),
-                    InputField('shiftId', 'Ca', initial: currentShift(runtime)),
-                    const InputField('reason', 'Nội dung chi'),
-                  ],
-                ),
+                onPressed: () => openExpense(context, runtime),
                 child: const Text('Lập phiếu chi'),
               ),
             if (allowed(runtime, Operation.shiftClose))
@@ -2568,6 +2680,17 @@ class WarrantiesPage extends StatelessWidget {
                       icon: const Icon(Icons.swap_horiz),
                       onPressed: () => replace(context, row, data),
                     ),
+                  if (allowed(runtime, Operation.expense))
+                    IconButton(
+                      tooltip: 'Lập phiếu chi bảo hành',
+                      icon: const Icon(Icons.payments_outlined),
+                      onPressed: () => openExpense(
+                        context,
+                        runtime,
+                        referenceKind: 'warranty',
+                        referenceId: data['id'] as String,
+                      ),
+                    ),
                   IconButton(
                     icon: const Icon(Icons.edit_outlined),
                     onPressed: () => commandDialog(
@@ -2591,7 +2714,7 @@ class WarrantiesPage extends StatelessWidget {
                         ),
                         InputField(
                           'cost',
-                          'Chi phí (VND)',
+                          'Chi phí theo dõi (VND)',
                           number: true,
                           initial: '${data['cost']}',
                         ),

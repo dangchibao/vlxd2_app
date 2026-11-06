@@ -14,6 +14,7 @@ import 'catalog_art.dart';
 import 'barcode_scan.dart';
 import 'material_calculator.dart';
 import 'reports_search.dart';
+import 'bayhai_style.dart';
 
 class CatalogPage extends StatelessWidget {
   final AppRuntime runtime;
@@ -186,9 +187,31 @@ class CatalogPage extends StatelessWidget {
     item: (context, row, data) => Card(
       child: ListTile(
         leading: ProductPhoto(data['imageUrl']),
-        title: Text('${data['sku']} • ${data['name']}'),
-        subtitle: Text(
-          '${data['group'] ?? ''} • ${data['brand'] ?? ''} ${data['model'] ?? ''}\n${vnd(data['price'] as int)} / ${data['unit']} ${data['active'] == false ? '• Ngừng kinh doanh' : ''}',
+        title: Text(
+          data['name'] as String,
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+        subtitle: Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(
+                text: [data['sku'], data['group'], data['brand'], data['model']]
+                    .whereType<String>()
+                    .where((part) => part.isNotEmpty)
+                    .join(' • '),
+                style: const TextStyle(color: BayHaiStyle.muted),
+              ),
+              TextSpan(
+                text: "\n${vnd(data['price'] as int)} / ${data['unit']}",
+                style: const TextStyle(
+                  color: BayHaiStyle.red,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              if (data['active'] == false)
+                const TextSpan(text: ' • Ngừng kinh doanh'),
+            ],
+          ),
         ),
         isThreeLine: true,
         trailing: allowed(runtime, Operation.catalog)

@@ -127,7 +127,7 @@ class ReceiptRenderer {
       'sale' => 'PHIẾU BÁN HÀNG',
       'quote' => 'BÁO GIÁ',
       'purchase' => 'ĐƠN MUA HÀNG',
-      'delivery' => 'PHIẾU GIAO HÀNG',
+      'delivery' || 'deliveryTrip' => 'PHIẾU GIAO HÀNG',
       'shiftClose' => 'PHIẾU CHỐT CA',
       'expense' => 'PHIẾU CHI',
       'payment' => 'PHIẾU THU',
@@ -191,9 +191,9 @@ class ReceiptRenderer {
         'Mã: ${textField(data, 'id')}',
         style: const pw.TextStyle(fontSize: 8),
       ),
-      if (data['createdAt'] != null)
+      if ((data['createdAt'] ?? data['deliveredAt']) != null)
         pw.Text(
-          'Ngày: ${data['createdAt']}',
+          'Ngày: ${data['createdAt'] ?? data['deliveredAt']}',
           style: const pw.TextStyle(fontSize: 8),
         ),
       if (data['customerId'] != null)
@@ -202,7 +202,10 @@ class ReceiptRenderer {
         pw.Text('NCC: ${data['supplierName'] ?? data['supplierId']}'),
       if (kind == 'quote') pw.Text('Phiên bản ${data['version']}'),
       if (data['warehouse'] != null) pw.Text('Kho: ${data['warehouse']}'),
-      if (data['vehicleId'] != null) pw.Text('Xe: ${data['vehicleId']}'),
+      if (data['vehicleId'] != null)
+        pw.Text('Xe: ${data['vehiclePlate'] ?? data['vehicleId']}'),
+      if (kind == 'deliveryTrip' && data['address'] != null)
+        pw.Text('Địa chỉ: ${data['address']}'),
       for (final field in const {
         'saleId': 'Đơn bán',
         'returnId': 'Phiếu hàng trả',

@@ -123,6 +123,14 @@ class AuthorityEngine {
         version: nextVersion,
       ),
     );
+    // The driver reads only the delivery projection and needs the current
+    // sale version even when a payment or a return changed the sale.
+    if (kind == 'sale' && value['deliveryStatus'] is String) {
+      await _deliveryProjection(id, {
+        ...value,
+        'version': nextVersion,
+      }, value['deliveryStatus'] as String);
+    }
   }
 
   void _fresh(Map<String, dynamic> previous) {
@@ -393,6 +401,7 @@ class AuthorityEngine {
           'quote',
           'purchase',
           'delivery',
+          'deliveryTrip',
           'shiftClose',
           'expense',
           'payment',
@@ -1040,8 +1049,10 @@ class AuthorityEngine {
           if (p['latE6'] != null) 'latE6': p['latE6'],
           if (p['lngE6'] != null) 'lngE6': p['lngE6'],
         };
-        await _deliveryProjection(id, {...destination}, 'assigned');
-        return {...destination, 'deliveryStatus': 'assigned'};
+        return {
+          ...destination,
+          'deliveryStatus': _deliveryProgress(old['lines'] as List),
+        };
       case Operation.catalog:
         final sku = textField(p, 'sku').toUpperCase(),
             name = textField(p, 'name'),
@@ -1344,6 +1355,8 @@ class AuthorityEngine {
         return {
           ...old,
           'lines': lines,
+          if (old['deliveryStatus'] is String)
+            'deliveryStatus': _deliveryProgress(lines),
           'debt': (old['debt'] as int) - reduction,
           'returnedValue': (old['returnedValue'] as int? ?? 0) + credit,
           'returnedCost': (old['returnedCost'] as int? ?? 0) + restoredCost,
@@ -1628,7 +1641,18 @@ class AuthorityEngine {
           'paid': 0,
           'debt': total,
           'status': 'posted',
-        };
+        }..removeWhere(
+          (key, _) => const {
+            'deliveryStatus',
+            'driverId',
+            'vehicleId',
+            'vehiclePlate',
+            'loadKg',
+            'scheduledAt',
+            'latE6',
+            'lngE6',
+          }.contains(key),
+        );
       case Operation.payment:
         if (old.isEmpty) {
           throw const BusinessException('missing', 'Không tìm thấy đơn bán.');
@@ -1679,7 +1703,15 @@ class AuthorityEngine {
             'Chỉ được cập nhật chuyến được giao.',
           );
         }
+        if ((old['driverId'] != null && old['driverId'] != p['driverId']) ||
+            (old['vehicleId'] != null && old['vehicleId'] != p['vehicleId'])) {
+          throw const BusinessException(
+            'delivery',
+            'Xe hoặc tài xế đã thay đổi. Mở lại chuyến giao.',
+          );
+        }
         final delivered = _lines(p);
+        final tripLines = <Map<String, dynamic>>[];
         final lines = (old['lines'] as List)
             .map((l) => Map<String, dynamic>.from(l as Map))
             .toList();
@@ -1699,10 +1731,15 @@ class AuthorityEngine {
             throw const BusinessException('excess', 'Giao vượt số lượng đơn.');
           }
           target['delivered'] = next;
+          tripLines.add({
+            'productId': target['productId'],
+            'sku': target['sku'],
+            'name': target['name'],
+            'unit': target['unit'],
+            'quantity': quantity,
+          });
         }
-        final status = lines.every((l) => l['quantity'] == l['delivered'])
-            ? 'delivered'
-            : 'partial';
+        final status = _deliveryProgress(lines);
         final result = {
           ...old,
           'lines': lines,
@@ -1710,14 +1747,21 @@ class AuthorityEngine {
           'driverId': p['driverId'],
           'vehicleId': p['vehicleId'],
         };
+        final deliveredAt = DateTime.now().toUtc().toIso8601String();
         await _write('deliveryTrip', '$id:${(old['version'] as int) + 1}', {
           'saleId': id,
-          'driverId': actor.uid,
+          'driverId': p['driverId'],
+          'operatorUid': actor.uid,
           'vehicleId': p['vehicleId'],
-          'lines': delivered,
-          'deliveredAt': DateTime.now().toUtc().toIso8601String(),
+          'vehiclePlate': old['vehiclePlate'] ?? p['vehicleId'],
+          'customerId': old['customerId'],
+          'customerName': old['customerName'],
+          'address': old['address'],
+          'storeSnapshot': old['storeSnapshot'],
+          'lines': tripLines,
+          'deliveredAt': deliveredAt,
+          'createdAt': deliveredAt,
         });
-        await _deliveryProjection(id, result, status);
         return result;
       case Operation.assemble:
         _fresh(old);
@@ -1991,7 +2035,25 @@ class AuthorityEngine {
             'Phương thức chi không hợp lệ.',
           );
         }
-        return {...p, 'status': 'posted'};
+        final reference = <String, dynamic>{};
+        if (p['referenceKind'] != null || p['referenceId'] != null) {
+          final kind = textField(p, 'referenceKind');
+          final targetId = textField(p, 'referenceId');
+          if (!{'deliveryTrip', 'warranty'}.contains(kind) ||
+              (await read(kind, targetId)).isEmpty) {
+            throw const BusinessException(
+              'expense',
+              'Chuyến giao hoặc phiếu bảo hành không tồn tại.',
+            );
+          }
+          reference.addAll({
+            'referenceKind': kind,
+            'referenceId': targetId,
+            'reference':
+                "${kind == 'deliveryTrip' ? 'Chuyến giao' : 'Bảo hành'} $targetId",
+          });
+        }
+        return {...p, ...reference, 'status': 'posted'};
       case Operation.shiftClose:
         _fresh(old);
         final shiftId = textField(p, 'shiftId');
@@ -2153,6 +2215,19 @@ class AuthorityEngine {
     }
   }
 
+  String _deliveryProgress(List lines) {
+    if (lines.every(
+      (line) =>
+          (line['delivered'] as int) >=
+          (line['quantity'] as int) - (line['returned'] as int? ?? 0),
+    )) {
+      return 'delivered';
+    }
+    return lines.any((line) => (line['delivered'] as int) > 0)
+        ? 'partial'
+        : 'assigned';
+  }
+
   Future<void> _deliveryProjection(
     String id,
     Map<String, dynamic> sale,
@@ -2169,7 +2244,7 @@ class AuthorityEngine {
       'loadKg': sale['loadKg'] ?? 0,
       if (sale['latE6'] != null) 'latE6': sale['latE6'],
       if (sale['lngE6'] != null) 'lngE6': sale['lngE6'],
-      'saleVersion': (sale['version'] as int) + 1,
+      'saleVersion': sale['version'],
       'status': status,
       'lines': [
         for (final line in sale['lines'] as List)
@@ -2179,6 +2254,7 @@ class AuthorityEngine {
             'unit': line['unit'],
             'quantity': line['quantity'],
             'delivered': line['delivered'],
+            'returned': line['returned'] ?? 0,
           },
       ],
     });

@@ -252,24 +252,52 @@ void main() {
       'method': 'cash',
       'shiftId': 'today',
     }, version: 1);
-    final paid = await apply(Operation.payment, 's', {
-      'amount': 150000,
-      'method': 'bank',
-      'shiftId': 'today',
-    }, version: 2);
-    expect(paid['debt'], 0);
     await apply(Operation.delivery, 's', {
       'driverId': 'd',
       'vehicleId': 'v',
       'lines': [item(6000)],
+    }, version: 2);
+    final paid = await apply(Operation.payment, 's', {
+      'amount': 150000,
+      'method': 'bank',
+      'shiftId': 'today',
     }, version: 3);
+    expect(paid['debt'], 0);
+    final delivery = await engine.read('delivery', 's');
+    expect(delivery['saleVersion'], 4);
+    expect(delivery['status'], 'partial');
     final d = await apply(Operation.delivery, 's', {
       'driverId': 'd',
       'vehicleId': 'v',
       'lines': [item(4000)],
-    }, version: 4);
+    }, version: delivery['saleVersion'] as int);
     expect(d['deliveryStatus'], 'delivered');
     expect((await engine.stock('main', product))['quantity'], 0);
+    final first = await engine.read('deliveryTrip', 's:3');
+    final second = await engine.read('deliveryTrip', 's:5');
+    expect(first['driverId'], 'd');
+    expect((first['lines'] as List).single['quantity'], 6000);
+    expect((second['lines'] as List).single['quantity'], 4000);
+    final expense = {
+      'amount': 10000,
+      'method': 'cash',
+      'shiftId': 'today',
+      'reason': 'Chi phí chuyến giao',
+      'referenceKind': 'deliveryTrip',
+    };
+    await expectLater(
+      apply(Operation.expense, 'bad-link', {
+        ...expense,
+        'referenceId': 'missing',
+      }),
+      throwsA(isA<BusinessException>()),
+    );
+    final posted = await apply(Operation.expense, 'trip-cost', {
+      ...expense,
+      'referenceId': 's:3',
+    });
+    expect(posted['referenceId'], 's:3');
+    expect((await engine.read('shiftTotals', 'today'))['cashNet'], 40000);
   });
   test(
     'Shift separates cash from bank and locks further collections',

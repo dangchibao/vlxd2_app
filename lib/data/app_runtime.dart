@@ -681,6 +681,7 @@ class AppRuntime extends ChangeNotifier {
     int limit = 100,
     String search = '',
     String? recordId,
+    String? partyType,
   }) =>
       (db.select(db.businessRecords)
             ..where((r) => r.kind.equals(kind))
@@ -693,6 +694,13 @@ class AppRuntime extends ChangeNotifier {
               (r) => recordId == null
                   ? const Constant(true)
                   : r.id.equals('$kind:$recordId'),
+            )
+            ..where(
+              (r) => partyType == null
+                  ? const Constant(true)
+                  : const CustomExpression<String>(
+                      "json_extract(payload, '\$.type')",
+                    ).isIn([partyType, 'both']),
             )
             ..orderBy([(r) => OrderingTerm.asc(r.id)])
             ..limit(limit, offset: offset))

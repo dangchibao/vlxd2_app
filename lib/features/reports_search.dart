@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:async';
 
+import 'package:drift/drift.dart' show Variable;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -15,6 +16,7 @@ import 'reservations_page.dart';
 import '../domain/operations.dart';
 import 'revenue_chart.dart';
 import 'stock_period_page.dart';
+import 'bayhai_style.dart';
 import 'business_pages.dart';
 
 class ReportsPage extends StatefulWidget {
@@ -35,6 +37,8 @@ class _ReportsPageState extends State<ReportsPage> {
   int days = 30;
   DateTimeRange? customRange;
   String exportKind = 'stock';
+  bool get exportIsSnapshot =>
+      const {'stock', 'receivable', 'payable'}.contains(exportKind);
   Future<void> exportSummary(
     FinancialReport report,
     DateTime start,
@@ -66,16 +70,33 @@ class _ReportsPageState extends State<ReportsPage> {
     }
   }
 
-  Future<void> exportRecords() async {
+  Future<void> exportRecords(DateTime start, DateTime end) async {
     try {
       final kind = exportKind, db = widget.runtime.db;
-      final rows =
-          await (db.select(db.businessRecords)
-                ..where((r) => r.kind.equals(kind))
-                ..limit(20001))
-              .get();
+      final current = exportIsSnapshot;
+      const documentDay =
+          "julianday(coalesce(json_extract(payload, '\$.createdAt'), "
+          "json_extract(payload, '\$.deliveredAt')))";
+      final rows = await db
+          .customSelect(
+            'SELECT id, payload FROM business_records WHERE kind = ? '
+            '${current ? '' : 'AND $documentDay >= julianday(?) AND $documentDay < julianday(?) '}'
+            'ORDER BY id LIMIT 20001',
+            variables: [
+              Variable(kind),
+              if (!current) ...[
+                Variable(start.toUtc().toIso8601String()),
+                Variable(end.toUtc().toIso8601String()),
+              ],
+            ],
+          )
+          .get();
       if (rows.length > 20000) {
-        throw const FormatException('Chọn khoảng dữ liệu nhỏ hơn 20.000 dòng.');
+        throw FormatException(
+          current
+              ? 'Sổ hiện tại vượt giới hạn 20.000 dòng.'
+              : 'Khoảng ngày có hơn 20.000 dòng. Chọn kỳ ngắn hơn.',
+        );
       }
       final columns = switch (kind) {
         'stock' => ['productId', 'warehouse', 'quality', 'quantity', 'value'],
@@ -90,15 +111,34 @@ class _ReportsPageState extends State<ReportsPage> {
           'cost',
         ],
         'purchase' => ['supplierId', 'createdAt', 'status', 'receivedValue'],
-        'delivery' => [
+        'deliveryTrip' => [
+          'saleId',
           'customerId',
           'driverId',
           'vehiclePlate',
-          'scheduledAt',
-          'status',
+          'deliveredAt',
           'address',
         ],
+        'expense' => [
+          'createdAt',
+          'amount',
+          'method',
+          'shiftId',
+          'reason',
+          'reference',
+        ],
+        'qualityDisposition' => [
+          'createdAt',
+          'warehouse',
+          'productId',
+          'quantity',
+          'quality',
+          'action',
+          'reason',
+          'value',
+        ],
         'warranty' => [
+          'createdAt',
           'customerId',
           'saleId',
           'serial',
@@ -107,6 +147,7 @@ class _ReportsPageState extends State<ReportsPage> {
           'cost',
         ],
         'shiftClose' => [
+          'createdAt',
           'shiftId',
           'opening',
           'expected',
@@ -136,7 +177,12 @@ class _ReportsPageState extends State<ReportsPage> {
         'receivedValue': 'Giá trị đã nhận VND',
         'driverId': 'Tài xế',
         'vehiclePlate': 'Xe',
-        'scheduledAt': 'Lịch giao',
+        'deliveredAt': 'Ngày giao',
+        'amount': 'Số tiền VND',
+        'method': 'Phương thức',
+        'reason': 'Nội dung / Lý do',
+        'reference': 'Chứng từ liên quan',
+        'action': 'Hướng xử lý',
         'address': 'Địa chỉ',
         'saleId': 'Đơn bán',
         'serial': 'Serial',
@@ -152,18 +198,19 @@ class _ReportsPageState extends State<ReportsPage> {
         fileName: 'bao-cao-$kind.xlsx',
         bytes: XlsxCatalog().table(
           ['Mã', ...columns.map((c) => labels[c] ?? c)],
-          [
-            for (final row in rows)
-              [
-                row.id,
-                ...columns.map((c) {
-                  final value = recordData(row)[c];
-                  return c == 'quantity' && value is int
-                      ? qty(value)
-                      : value as Object?;
-                }),
-              ],
-          ],
+          rows.map((row) {
+            final data =
+                jsonDecode(row.read<String>('payload')) as Map<String, dynamic>;
+            return [
+              row.read<String>('id'),
+              ...columns.map((column) {
+                final value = data[column];
+                return column == 'quantity' && value is int
+                    ? qty(value)
+                    : value;
+              }),
+            ];
+          }).toList(),
         ),
         mimeType:
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -205,6 +252,10 @@ class _ReportsPageState extends State<ReportsPage> {
                 );
       final events = snapshot.data!,
           report = FinancialReport.fromEvents(events, start, end);
+      final mobile = MediaQuery.sizeOf(context).width < 800;
+      final metricWidth = mobile
+          ? (MediaQuery.sizeOf(context).width - 36) / 2
+          : 240.0;
       return ListView(
         children: [
           Wrap(
@@ -288,7 +339,9 @@ class _ReportsPageState extends State<ReportsPage> {
                     ('payable', 'Nợ NCC'),
                     ('sale', 'Bán hàng'),
                     ('purchase', 'Mua hàng'),
-                    ('delivery', 'Giao hàng'),
+                    ('deliveryTrip', 'Chuyến giao'),
+                    ('expense', 'Phiếu chi'),
+                    ('qualityDisposition', 'Hàng lỗi'),
                     ('warranty', 'Bảo hành'),
                     ('shiftClose', 'Chốt ca'),
                   ])
@@ -297,8 +350,12 @@ class _ReportsPageState extends State<ReportsPage> {
                 onChanged: (v) => setState(() => exportKind = v!),
               ),
               OutlinedButton(
-                onPressed: exportRecords,
-                child: const Text('Xuất sổ hiện tại Excel'),
+                onPressed: () => exportRecords(start, end),
+                child: Text(
+                  exportIsSnapshot
+                      ? 'Xuất sổ hiện tại Excel'
+                      : 'Xuất chứng từ trong kỳ',
+                ),
               ),
             ],
           ),
@@ -316,10 +373,10 @@ class _ReportsPageState extends State<ReportsPage> {
                 ('Thu/chi chuyển khoản', report.bankNet),
               ])
                 SizedBox(
-                  width: 240,
+                  width: metricWidth,
                   child: Card(
                     child: Padding(
-                      padding: const EdgeInsets.all(18),
+                      padding: EdgeInsets.all(mobile ? 12 : 18),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -328,11 +385,11 @@ class _ReportsPageState extends State<ReportsPage> {
                           Text(
                             largeVnd(entry.$2),
                             style: TextStyle(
-                              fontSize: 21,
+                              fontSize: mobile ? 16 : 21,
                               fontWeight: FontWeight.bold,
                               color: entry.$2.isNegative
-                                  ? Colors.red
-                                  : Colors.blue.shade800,
+                                  ? BayHaiStyle.red
+                                  : BayHaiStyle.navy,
                             ),
                           ),
                         ],

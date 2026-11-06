@@ -59,20 +59,20 @@ trạm hoặc cờ đổi mật khẩu qua màn hình này.
 
 ## Chạy ứng dụng
 
-Các bản 0.9.0 nằm trong thư mục `dist`.
+Các bản 1.0.0 nằm trong thư mục `dist`.
 
-Khi cập nhật, hãy mở bản 0.8.0 trên máy trạm trước khi gửi phiếu có nhiều
+Khi cập nhật, hãy mở bản 1.0.0 trên máy trạm trước khi gửi phiếu có nhiều
 lô. Với hàng theo lô, nhập mã lô nếu chỉ dùng một lô. Nếu có nhiều lô trên
 một dòng, ví dụ dòng hàng 5 đơn vị gốc, nhập `A:2; B:3`. Khi nhận hàng có
 thể ghi mã màu riêng theo dạng `A:2:BE; B:3:XAM`. Khi trả hàng, nhập lô
 thực trả; ứng dụng hiển thị số lượng còn được trả của từng lô. Khi bán các
 lô khác mã màu, chỉ xác nhận trộn màu sau khi khách đồng ý.
 
-- Windows: giải nén `VLXD-Bay-Hai-Windows-0.9.0.zip` rồi mở
+- Windows: giải nén `VLXD-Bay-Hai-Windows-1.0.0.zip` rồi mở
   `app/vlxd_bay_hai.exe`. Giữ các DLL và thư mục `data` cạnh file chạy.
-- Android: `VLXD-Bay-Hai-Android-0.9.0.apk` có chữ ký debug dành cho cài thử
+- Android: `VLXD-Bay-Hai-Android-1.0.0.apk` có chữ ký debug dành cho cài thử
   ngoài Play Store. Hỗ trợ Android API 24 trở lên.
-- iPhone: giải nén `VLXD-Bay-Hai-PWA-0.9.0.zip` lên máy chủ tĩnh HTTPS, rồi
+- iPhone: giải nén `VLXD-Bay-Hai-PWA-1.0.0.zip` lên máy chủ tĩnh HTTPS, rồi
   thêm vào màn hình chính từ Safari theo mục PWA bên dưới.
 
 Để chạy từ mã nguồn:
@@ -144,7 +144,7 @@ giá âm thầm. Báo giá chuyển đơn giữ giá snapshot đã duyệt.
   mã dự phòng có thể cần mạng lúc mở camera lần đầu. Windows nhận mã từ
   máy quét USB dạng bàn phím hoặc ô nhập tay.
 
-Đóng bản Windows cũ trên máy trạm và mở bản 0.8.0 trước khi gửi lệnh lắp bộ
+Đóng bản Windows cũ trên máy trạm và mở bản 1.0.0 trước khi gửi lệnh lắp bộ
 hay xử lý hàng lỗi từ điện thoại.
 
 ## Công nợ, báo cáo kho, bảng giá và tem
@@ -162,8 +162,22 @@ hay xử lý hàng lỗi từ điện thoại.
   Xem trước hoặc lưu PDF 60 × 40 mm. Trên Windows có thể gửi in và xem lại
   nhật ký. Chọn đúng khổ giấy trên driver trước khi in.
 
-Đóng bản Windows cũ trên máy trạm và mở bản 0.8.0 trước khi gửi lệnh
+Đóng bản Windows cũ trên máy trạm và mở bản 1.0.0 trước khi gửi lệnh
 phân bổ thanh toán từ thiết bị khác.
+
+## Chuyến giao và chi phí thực tế
+
+Trong **Giao hàng → Từng chuyến**, mở một chuyến để xem hoặc in số hàng đã
+giao trong chuyến đó. Nhấn biểu tượng phiếu chi để ghi chi phí của chuyến.
+Trong **Bảo hành**, biểu tượng tương tự tạo phiếu chi liên kết phiếu bảo hành.
+Số tiền thực chi vào ca và báo cáo lợi nhuận qua phiếu chi đã xác nhận.
+
+Trong **Báo cáo**, chọn khoảng ngày rồi xuất chứng từ trong kỳ. Tồn kho và
+công nợ trong danh sách xuất là số dư hiện tại. Dùng **Nhập xuất tồn** để
+xem biến động kho theo khoảng ngày.
+
+Khi NCC giao dư, đối chiếu với đơn trước khi nhận. Nếu cửa hàng đồng ý mua
+phần dư, lập đơn mua bổ sung và nhận phần đó theo chứng từ riêng.
 
 ## In K80
 
