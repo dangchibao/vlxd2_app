@@ -5,6 +5,7 @@ import '../data/app_runtime.dart';
 import '../data/database.dart';
 import 'business_pages.dart';
 import 'catalog_art.dart';
+import 'bayhai_style.dart';
 
 String businessStatus(Object? value) => switch (value) {
   'posted' => 'Đã ghi sổ',
@@ -60,9 +61,11 @@ class RecordTable extends StatelessWidget {
       ('imageUrl', 'Hình ảnh'),
       ('sku', 'Mã hàng'),
       ('name', 'Tên hàng'),
+      ('group', 'Nhóm hàng'),
       ('model', 'Quy cách'),
       ('unit', 'ĐVT'),
       ('price', 'Giá bán'),
+      ('active', 'Trạng thái'),
     ],
     'stock' => [
       ('productId', 'Hàng hóa'),
@@ -124,7 +127,67 @@ class RecordTable extends StatelessWidget {
   };
   Widget cell(BusinessRecord row, Map<String, dynamic> data, String key) {
     final value = key == 'partyName' ? data[key] ?? data['id'] : data[key];
-    if (key == 'imageUrl') return ProductPhoto(value, size: 40);
+    if (key == 'imageUrl') return ProductPhoto(value, size: 44);
+
+    if (kind == 'catalog' && key == 'active') {
+      final isActive = value != false;
+      final color = isActive ? BayHaiStyle.green : BayHaiStyle.muted;
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: isActive ? const Color(0xFFE8F7F1) : const Color(0xFFF0F3F7),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          isActive ? 'Đang kinh doanh' : 'Ngừng kinh doanh',
+          style: TextStyle(
+            color: color,
+            fontWeight: FontWeight.w600,
+            fontSize: 12,
+          ),
+        ),
+      );
+    }
+
+    if (kind == 'catalog' && key == 'group') {
+      final label = value is String && value.trim().isNotEmpty
+          ? value.trim()
+          : 'Chưa phân nhóm';
+      return ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 145),
+        child: Text(
+          label,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: BayHaiStyle.muted),
+        ),
+      );
+    }
+
+    if (kind == 'catalog' && key == 'sku') {
+      return Text(
+        '${value ?? '—'}',
+        style: const TextStyle(
+          fontWeight: FontWeight.w700,
+          color: Color(0xFF0059D6),
+        ),
+      );
+    }
+
+    if (kind == 'catalog' && key == 'name') {
+      return ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 240),
+        child: Text(
+          '${value ?? '—'}',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF162B4A),
+          ),
+        ),
+      );
+    }
     if (key == 'productId' && value is String) {
       final db = runtime.db;
       return FutureBuilder(
@@ -148,10 +211,14 @@ class RecordTable extends StatelessWidget {
       return Text(
         value is int ? vnd(value) : '—',
         style: TextStyle(
-          color: key == 'debt' && value is int && value > 0
+          fontWeight: kind == 'catalog' && key == 'price'
+              ? FontWeight.w700
+              : FontWeight.normal,
+          color: kind == 'catalog' && key == 'price'
+              ? BayHaiStyle.primary
+              : key == 'debt' && value is int && value > 0
               ? Colors.orange.shade900
               : null,
-          fontWeight: FontWeight.w600,
         ),
       );
     }
@@ -208,41 +275,63 @@ class RecordTable extends StatelessWidget {
     ),
   );
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, size) => SingleChildScrollView(
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(minWidth: size.maxWidth),
-          child: DataTable(
-            showCheckboxColumn: false,
-            columnSpacing: 22,
-            horizontalMargin: 16,
-            headingRowColor: const WidgetStatePropertyAll(Color(0xffe7effc)),
-            headingTextStyle: const TextStyle(
-              fontWeight: FontWeight.bold,
-              color: Color(0xff003c94),
-            ),
-            dataRowMinHeight: 52,
-            dataRowMaxHeight: 68,
-            columns: [
-              for (final c in columns) DataColumn(label: Text(c.$2)),
-              const DataColumn(label: Text('Thao tác')),
-            ],
-            rows: [
-              for (var i = 0; i < rows.length; i++)
-                buildRow(context, rows[i], i),
-            ],
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, size) {
+        return Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: BayHaiStyle.border),
           ),
-        ),
-      ),
-    ),
-  );
+          clipBehavior: Clip.antiAlias,
+          child: SingleChildScrollView(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minWidth: size.maxWidth),
+                child: DataTable(
+                  showCheckboxColumn: false,
+                  dividerThickness: 0.6,
+                  columnSpacing: kind == 'catalog' ? 22 : 28,
+                  horizontalMargin: 20,
+                  headingRowHeight: 52,
+                  headingRowColor: const WidgetStatePropertyAll(
+                    Color(0xFFEAF2FF),
+                  ),
+                  headingTextStyle: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF12386D),
+                  ),
+                  dataTextStyle: const TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFF1D2C43),
+                  ),
+                  dataRowMinHeight: 60,
+                  dataRowMaxHeight: 72,
+                  columns: [
+                    for (final c in columns) DataColumn(label: Text(c.$2)),
+                    const DataColumn(label: Text('Thao tác')),
+                  ],
+                  rows: [
+                    for (var i = 0; i < rows.length; i++)
+                      buildRow(context, rows[i], i),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   DataRow buildRow(BuildContext context, BusinessRecord row, int index) {
     final data = recordData(row);
     return DataRow(
       color: WidgetStatePropertyAll(
-        index.isEven ? Colors.white : const Color(0xfff8faff),
+        index.isEven ? Colors.white : const Color(0xFFF6F9FE),
       ),
       onSelectChanged: (_) => open(context, row, data),
       cells: [
@@ -251,7 +340,7 @@ class RecordTable extends StatelessWidget {
           IconButton(
             tooltip: 'Mở chi tiết và thao tác',
             onPressed: () => open(context, row, data),
-            icon: const Icon(Icons.more_horiz, color: Color(0xff0055d9)),
+            icon: const Icon(Icons.more_horiz, color: BayHaiStyle.primary),
           ),
         ),
       ],

@@ -9,6 +9,8 @@ import 'database.dart';
 import 'firebase_auth_rest.dart';
 import 'firestore_rest.dart';
 
+import 'package:flutter/foundation.dart';
+
 /// Stages all business writes and commits them with receipt/event atomically.
 /// No SQLite state is treated as confirmed before a cloud commit succeeds.
 class FirestoreAuthorityStore implements AuthorityStore {
@@ -51,18 +53,32 @@ class FirestoreAuthorityStore implements AuthorityStore {
 
   String _recordPath(String kind, String id) =>
       _path('documents', _key('$kind:$id'));
+
   Future<Map<String, dynamic>?> _load(String path) async {
     if (_transaction == null || _session == null) {
       throw StateError('Outside authority transaction');
     }
+
     if (_writes.containsKey(path)) return _writes[path];
+
     if (!_reads.containsKey(path)) {
-      _reads[path] = await firestore.get(
-        path,
-        _session!,
-        transaction: _transaction,
-      );
+      debugPrint('[VLXD] Firestore READ: $path');
+
+      try {
+        _reads[path] = await firestore.get(
+          path,
+          _session!,
+          transaction: _transaction,
+        );
+
+        debugPrint('[VLXD] Firestore READ OK: $path');
+      } catch (e) {
+        debugPrint('[VLXD] Firestore READ FAILED: $path');
+        debugPrint('[VLXD] Error: $e');
+        rethrow;
+      }
     }
+
     return _reads[path]?.data;
   }
 
@@ -83,8 +99,15 @@ class FirestoreAuthorityStore implements AuthorityStore {
       for (var attempt = 0; attempt < 5; attempt++) {
         _reads.clear();
         _writes.clear();
+
         _session = await sessionProvider();
+
+        debugPrint('[VLXD] Firestore BEGIN');
+
         _transaction = await firestore.begin(_session!);
+
+        debugPrint('[VLXD] Firestore BEGIN OK');
+
         try {
           final result = await action();
           if (_writes.length > 400) {
@@ -102,7 +125,22 @@ class FirestoreAuthorityStore implements AuthorityStore {
                   : firestore.updateWrite(old, entry.value),
             );
           }
-          await firestore.commit(_session!, writes, transaction: _transaction);
+
+          debugPrint('[VLXD] Firestore COMMIT: ${writes.length} writes');
+
+          try {
+            await firestore.commit(
+              _session!,
+              writes,
+              transaction: _transaction,
+            );
+
+            debugPrint('[VLXD] Firestore COMMIT OK');
+          } catch (e) {
+            debugPrint('[VLXD] Firestore COMMIT FAILED: $e');
+            rethrow;
+          }
+
           return result;
         } catch (error) {
           try {
@@ -278,10 +316,22 @@ class RemoteAuthorityProcessor {
     if (!RegExp(r'^[a-zA-Z0-9_-]{1,128}$').hasMatch(commandId)) {
       throw ArgumentError('Command ID không hợp lệ.');
     }
+
+    debugPrint('[VLXD] Processor: bat dau lay station token');
+
+    final stationSession = await store.sessionProvider();
+
+    debugPrint('[VLXD] Processor: da lay station token');
+
     final remote = await store.firestore.get(
       'stores/${store.storeId}/commands/$commandId',
-      await store.sessionProvider(),
+      stationSession,
     );
+
+    debugPrint(
+      '[VLXD] Processor: doc command xong, ton tai = ${remote != null}',
+    );
+
     if (remote == null) {
       throw const BusinessException('missing', 'Không tìm thấy command.');
     }
@@ -310,9 +360,18 @@ class RemoteAuthorityProcessor {
         payload: data['payload'] as Map<String, dynamic>,
         expectedVersion: integerField(data, 'expectedVersion'),
       );
-      return await AuthorityEngine.withStore(store)
+
+      debugPrint('[VLXD] Processor: bat dau AuthorityEngine');
+
+      final result = await AuthorityEngine.withStore(store)
           .executeAuthenticated(command, () => store.actor(actorUid));
+
+      debugPrint('[VLXD] Processor: AuthorityEngine hoan tat');
+
+      return result;
     } catch (error) {
+      debugPrint('[VLXD] Processor: gap loi ${error.runtimeType}: $error');
+
       if (error is! BusinessException &&
           error is! FormatException &&
           error is! TypeError &&

@@ -185,9 +185,11 @@ class _RecordListState extends State<RecordList> {
         SizedBox(
           width: 420,
           child: TextField(
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               prefixIcon: Icon(Icons.search),
-              hintText: 'Tìm mã, tên, điện thoại hoặc chứng từ…',
+              hintText: widget.kind == 'catalog'
+                  ? 'Tìm mã hàng hoặc tên sản phẩm...'
+                  : 'Tìm mã, tên, điện thoại hoặc chứng từ...',
             ),
             onChanged: (value) {
               searchTimer?.cancel();
@@ -216,10 +218,62 @@ class _RecordListState extends State<RecordList> {
               return const Center(child: CircularProgressIndicator());
             }
             final rows = snapshot.data!;
+
             if (rows.isEmpty && page == 0) {
-              return const Center(
-                child: Text(
-                  'Chưa có chứng từ đã xác nhận. Dữ liệu đang chờ ở mục Đồng bộ.',
+              final isCatalog = widget.kind == 'catalog';
+              final isSearching = search.isNotEmpty;
+
+              return Center(
+                child: Container(
+                  constraints: const BoxConstraints(maxWidth: 480),
+                  padding: const EdgeInsets.all(32),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFD8E5F7)),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isSearching
+                            ? Icons.search_off_rounded
+                            : isCatalog
+                            ? Icons.inventory_2_outlined
+                            : Icons.inbox_outlined,
+                        size: 64,
+                        color: const Color(0xFF0059D6),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        isSearching
+                            ? 'Không tìm thấy kết quả'
+                            : isCatalog
+                            ? 'Chưa có hàng hóa'
+                            : 'Chưa có dữ liệu hiển thị',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF14243C),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        isSearching
+                            ? 'Hãy thử tìm bằng mã hoặc tên khác.'
+                            : isCatalog
+                            ? 'Chọn "Thêm hàng hóa" để tạo sản phẩm hoặc kiểm tra dữ liệu đang chờ đồng bộ.'
+                            : 'Hãy kiểm tra trạng thái dữ liệu và đồng bộ.',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          height: 1.5,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               );
             }
@@ -972,7 +1026,7 @@ class _OrderComposerState extends State<OrderComposer> {
                 const SizedBox(height: 16),
                 TextField(
                   controller: warehouse,
-                  decoration: const InputDecoration(labelText: 'Kho'),
+                  decoration: InputDecoration(labelText: 'Kho'),
                   onChanged: (_) => setState(() {}),
                 ),
                 const SizedBox(height: 16),

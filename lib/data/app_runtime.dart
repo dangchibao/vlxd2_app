@@ -234,8 +234,26 @@ class AppRuntime extends ChangeNotifier {
       if (generation != _generation) return;
       await _persist(() => vault.write(candidate));
       if (!actor!.mustChangePassword) _start();
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('========== VLXD SYNC ERROR ==========');
+      debugPrint('Loai loi: ${e.runtimeType}');
+      debugPrint('Noi dung: $e');
+      debugPrintStack(stackTrace: stackTrace, maxFrames: 12);
+      debugPrint('=====================================');
+
       if (generation != _generation) return;
+
+      if (e is AuthFailure && !e.retryable) {
+        await logout();
+        error = e.message;
+        return;
+      }
+
+      offline = true;
+      error = e is BusinessException
+          ? e.message
+          : 'Chưa đồng bộ được. Dữ liệu chờ vẫn được giữ trên thiết bị.';
+
       session = null;
       actor = null;
       await _persist(vault.clear);
@@ -379,10 +397,34 @@ class AppRuntime extends ChangeNotifier {
         await _membership();
       }
       await sync.pump(actor!.uid);
+
+      final catalogCommands =
+          await (db.select(db.outbox)
+                ..where((o) => o.operation.equals('catalog'))
+                ..orderBy([(o) => OrderingTerm.desc(o.createdAt)])
+                ..limit(5))
+              .get();
+
+      debugPrint('[VLXD] So lenh hang hoa: ${catalogCommands.length}');
+
+      for (final command in catalogCommands) {
+        debugPrint(
+          '[VLXD] Lenh: ${command.id} | '
+          'Trang thai: ${command.status} | '
+          'Loi: ${command.lastError ?? "khong co"}',
+        );
+      }
       if (generation != _generation) return;
+
+      debugPrint('[VLXD] Station connected: ${stationSession != null}');
+
       if (stationSession != null) {
         try {
+          debugPrint('[VLXD] Bat dau xu ly tram');
+
           await _processStation();
+
+          debugPrint('[VLXD] Xu ly tram hoan tat');
         } on AuthFailure {
           await disconnectStation();
           throw const BusinessException(
@@ -538,7 +580,12 @@ class AppRuntime extends ChangeNotifier {
   }
 
   Future<void> _processStation() async {
+    debugPrint('[VLXD] Station: bat dau doc cursor');
+
     final cursor = await stationVault.readData('cursor');
+
+    debugPrint('[VLXD] Station: da doc cursor, bat dau query');
+
     final docs = await firestore.query('stores/${config.storeId}', {
       'from': [
         {'collectionId': 'commands'},
@@ -563,11 +610,18 @@ class AppRuntime extends ChangeNotifier {
         },
       'limit': 20,
     }, await _stationToken());
+
+    debugPrint('[VLXD] Station: query xong, so lenh = ${docs.length}');
+
     for (final doc in docs) {
+      debugPrint(
+        '[VLXD] Station: bat dau xu ly lenh ${doc.name.split('/').last}',
+      );
       final processor = RemoteAuthorityProcessor(
         FirestoreAuthorityStore(firestore, config.storeId, _stationToken),
       );
       await processor.process(doc.name.split('/').last);
+      debugPrint('[VLXD] Station: xu ly lenh xong');
       await stationVault.writeData('cursor', {
         'time':
             (doc.rawFields['createdAt'] as Map?)?['timestampValue'] ??
