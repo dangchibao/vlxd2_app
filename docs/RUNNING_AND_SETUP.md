@@ -59,7 +59,7 @@ trạm hoặc cờ đổi mật khẩu qua màn hình này.
 
 ## Chạy ứng dụng
 
-Các bản 1.0.0 nằm trong thư mục `dist`.
+Gói Windows 1.0.1 và các gói Android, PWA 1.0.0 nằm trong thư mục `dist`.
 
 Khi cập nhật, hãy mở bản 1.0.0 trên máy trạm trước khi gửi phiếu có nhiều
 lô. Với hàng theo lô, nhập mã lô nếu chỉ dùng một lô. Nếu có nhiều lô trên
@@ -68,7 +68,7 @@ thể ghi mã màu riêng theo dạng `A:2:BE; B:3:XAM`. Khi trả hàng, nhập
 thực trả; ứng dụng hiển thị số lượng còn được trả của từng lô. Khi bán các
 lô khác mã màu, chỉ xác nhận trộn màu sau khi khách đồng ý.
 
-- Windows: giải nén `VLXD-Bay-Hai-Windows-1.0.0.zip` rồi mở
+- Windows: giải nén `VLXD-Bay-Hai-Windows-1.0.1.zip` rồi mở
   `app/vlxd_bay_hai.exe`. Giữ các DLL và thư mục `data` cạnh file chạy.
 - Android: `VLXD-Bay-Hai-Android-1.0.0.apk` có chữ ký debug dành cho cài thử
   ngoài Play Store. Hỗ trợ Android API 24 trở lên.

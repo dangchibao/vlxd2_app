@@ -1315,6 +1315,23 @@ Future<void> lineAction(
   final lines = (data['lines'] as List)
       .map((v) => Map<String, dynamic>.from(v as Map))
       .toList();
+  if (op == Operation.receive) {
+    final missing = lines
+        .where((line) => line['name'] == null)
+        .map((line) => line['productId'] as String)
+        .toSet();
+    if (missing.isNotEmpty) {
+      final db = runtime.db;
+      final products = await (db.select(
+        db.products,
+      )..where((row) => row.id.isIn(missing))).get();
+      final names = {for (final product in products) product.id: product.name};
+      for (final line in lines) {
+        line['name'] ??= names[line['productId']] ?? line['productId'];
+      }
+    }
+  }
+  if (!context.mounted) return;
   final controllers = [for (final _ in lines) TextEditingController(text: '0')];
   final lotInputs = [for (final _ in lines) TextEditingController()];
   final serialInputs = [for (final _ in lines) TextEditingController()];
@@ -2510,7 +2527,8 @@ class FinancePage extends StatelessWidget {
                         kind == 'receivable' ||
                                 kind == 'payable' ||
                                 kind == 'customerDeposit'
-                            ? row.id.split(':').skip(1).join(':')
+                            ? data['partyName'] as String? ??
+                                  row.id.split(':').skip(1).join(':')
                             : data['reason'] as String? ??
                                   data['shiftId'] as String? ??
                                   'Chứng từ',

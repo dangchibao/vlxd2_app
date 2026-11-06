@@ -40,6 +40,66 @@ class MemoryVault extends SessionVault {
 }
 
 void main() {
+  test(
+    'Debt balances resolve and search synced customer and supplier names',
+    () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      final runtime = AppRuntime(
+        db,
+        const AppConnection(
+          projectId: 'demo-vlxd-bayhai',
+          storeId: 'shop',
+          apiKey: 'fixture',
+        ),
+      );
+      addTearDown(() async {
+        runtime.dispose();
+        await db.close();
+      });
+      Future<void> add(String kind, String id, Map<String, dynamic> data) => db
+          .into(db.businessRecords)
+          .insert(
+            BusinessRecord(
+              id: '$kind:$id',
+              kind: kind,
+              version: 1,
+              payload: jsonEncode({'id': id, ...data}),
+            ),
+          );
+      await add('party', 'kh:01', {'name': 'Khách Hà', 'phone': '0901234567'});
+      await add('party', 'ncc', {'name': 'NCC Sơn'});
+      await add('receivable', 'kh:01', {'balance': 100});
+      await add('receivable', 'missing', {'balance': 200});
+      await add('payable', 'ncc', {'balance': 300});
+
+      final customers = await runtime
+          .records('receivable', search: 'Khách Hà')
+          .first;
+      expect(customers.single.id, 'receivable:kh:01');
+      expect(jsonDecode(customers.single.payload)['partyName'], 'Khách Hà');
+      expect(
+        (await runtime.records('receivable', search: '0901234567').first)
+            .single
+            .id,
+        customers.single.id,
+      );
+      final suppliers = await runtime
+          .records('payable', search: 'NCC Sơn')
+          .first;
+      expect(jsonDecode(suppliers.single.payload)['partyName'], 'NCC Sơn');
+      expect(
+        await runtime.records('receivable', search: 'NCC Sơn').first,
+        isEmpty,
+      );
+      expect(
+        (await runtime.records('receivable', recordId: 'missing').first)
+            .single
+            .id,
+        'receivable:missing',
+      );
+    },
+  );
+
   setUpAll(() {
     driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
   });

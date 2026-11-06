@@ -682,29 +682,73 @@ class AppRuntime extends ChangeNotifier {
     String search = '',
     String? recordId,
     String? partyType,
-  }) =>
-      (db.select(db.businessRecords)
-            ..where((r) => r.kind.equals(kind))
-            ..where(
-              (r) => search.isEmpty
-                  ? const Constant(true)
-                  : r.payload.contains(search),
-            )
-            ..where(
-              (r) => recordId == null
-                  ? const Constant(true)
-                  : r.id.equals('$kind:$recordId'),
-            )
-            ..where(
-              (r) => partyType == null
-                  ? const Constant(true)
-                  : const CustomExpression<String>(
-                      "json_extract(payload, '\$.type')",
-                    ).isIn([partyType, 'both']),
-            )
-            ..orderBy([(r) => OrderingTerm.asc(r.id)])
-            ..limit(limit, offset: offset))
-          .watch();
+  }) {
+    if (kind == 'receivable' || kind == 'payable') {
+      return _partyBalances(kind, offset, limit, search, recordId);
+    }
+    return (db.select(db.businessRecords)
+          ..where((r) => r.kind.equals(kind))
+          ..where(
+            (r) => search.isEmpty
+                ? const Constant(true)
+                : r.payload.contains(search),
+          )
+          ..where(
+            (r) => recordId == null
+                ? const Constant(true)
+                : r.id.equals('$kind:$recordId'),
+          )
+          ..where(
+            (r) => partyType == null
+                ? const Constant(true)
+                : const CustomExpression<String>(
+                    "json_extract(payload, '\$.type')",
+                  ).isIn([partyType, 'both']),
+          )
+          ..orderBy([(r) => OrderingTerm.asc(r.id)])
+          ..limit(limit, offset: offset))
+        .watch();
+  }
+
+  Stream<List<BusinessRecord>> _partyBalances(
+    String kind,
+    int offset,
+    int limit,
+    String search,
+    String? recordId,
+  ) {
+    final balances = db.businessRecords;
+    final parties = db.alias(balances, 'balance_party');
+    final partyId =
+        const Constant('party:') + balances.id.substr(kind.length + 2);
+    final query = db.select(balances).join([
+      leftOuterJoin(parties, parties.id.equalsExp(partyId)),
+    ])..where(balances.kind.equals(kind));
+    if (search.isNotEmpty) {
+      query.where(
+        balances.payload.contains(search) | parties.payload.contains(search),
+      );
+    }
+    if (recordId != null) query.where(balances.id.equals('$kind:$recordId'));
+    query
+      ..orderBy([OrderingTerm.asc(balances.id)])
+      ..limit(limit, offset: offset);
+    return query.watch().map(
+      (rows) => rows.map((result) {
+        final balance = result.readTable(balances);
+        final party = result.readTableOrNull(parties);
+        if (party == null) return balance;
+        final name =
+            (jsonDecode(party.payload) as Map<String, dynamic>)['name'];
+        if (name is! String || name.isEmpty) return balance;
+        final data = jsonDecode(balance.payload) as Map<String, dynamic>;
+        return balance.copyWith(
+          payload: jsonEncode({...data, 'partyName': name}),
+        );
+      }).toList(),
+    );
+  }
+
   @override
   void dispose() {
     _disposed = true;

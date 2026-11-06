@@ -492,7 +492,7 @@ class _WorkspaceState extends ConsumerState<Workspace> {
                       child: Text(
                         runtime == null
                             ? 'Chế độ xem thử cục bộ'
-                            : 'VLXD Bảy Hải 1.0.0',
+                            : 'VLXD Bảy Hải 1.0.1',
                       ),
                     ),
                   ],

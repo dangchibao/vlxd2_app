@@ -1395,14 +1395,23 @@ class AuthorityEngine {
         final lines = _lines(p);
         textField(p, 'supplierId');
         textField(p, 'warehouse');
+        final orderedLines = <Map<String, dynamic>>[];
         for (final l in lines) {
           integerField(l, 'unitCost');
-          if (await store.product(textField(l, 'productId')) == null) {
+          final product = await store.product(textField(l, 'productId'));
+          if (product == null) {
             throw const BusinessException(
               'missing',
               'Sản phẩm trong đơn mua không tồn tại.',
             );
           }
+          orderedLines.add({
+            ...l,
+            'name': product.name,
+            'sku': product.sku,
+            'unit': product.unit,
+            'received': 0,
+          });
         }
         return {
           ...p,
@@ -1412,9 +1421,7 @@ class AuthorityEngine {
           'supplierName':
               (await read('party', p['supplierId'] as String))['name'] ??
               p['supplierId'],
-          'lines': [
-            for (final l in lines) {...l, 'received': 0},
-          ],
+          'lines': orderedLines,
           'status': 'ordered',
         };
       case Operation.receive:
@@ -1500,7 +1507,25 @@ class AuthorityEngine {
             value,
             quality: quality as String,
           );
-          receiptLines.add({...l, 'lotAllocations': ?receivedLots});
+          if (ordered['name'] == null ||
+              ordered['sku'] == null ||
+              ordered['unit'] == null) {
+            final product = await store.product(l['productId'] as String);
+            if (product != null) {
+              ordered['name'] ??= product.name;
+              ordered['sku'] ??= product.sku;
+              ordered['unit'] ??= product.unit;
+            }
+          }
+          receiptLines.add({
+            ...l,
+            'name': ordered['name'],
+            'sku': ordered['sku'],
+            'unit': ordered['unit'],
+            'unitCost': ordered['unitCost'],
+            'total': value,
+            'lotAllocations': ?receivedLots,
+          });
           ordered['received'] = done + quantity;
           receiptValue += value;
         }
@@ -1508,6 +1533,8 @@ class AuthorityEngine {
         await _write('purchaseReceipt', '$id:${(old['version'] as int) + 1}', {
           'purchaseId': id,
           'supplierId': supplier,
+          'supplierName': old['supplierName'],
+          'storeSnapshot': old['storeSnapshot'],
           'warehouse': old['warehouse'],
           'lines': receiptLines,
           'total': receiptValue,

@@ -106,7 +106,8 @@ class RecordTable extends StatelessWidget {
       ('scheduledAt', 'Lịch giao'),
       ('status', 'Trạng thái'),
     ],
-    'receivable' || 'payable' => [('id', 'Đối tác'), ('balance', 'Số dư')],
+    'receivable' ||
+    'payable' => [('partyName', 'Đối tác'), ('balance', 'Số dư')],
     'warranty' => [
       ('id', 'Mã phiếu'),
       ('serial', 'Serial'),
@@ -122,7 +123,7 @@ class RecordTable extends StatelessWidget {
     ],
   };
   Widget cell(BusinessRecord row, Map<String, dynamic> data, String key) {
-    final value = data[key];
+    final value = key == 'partyName' ? data[key] ?? data['id'] : data[key];
     if (key == 'imageUrl') return ProductPhoto(value, size: 40);
     if (key == 'productId' && value is String) {
       final db = runtime.db;

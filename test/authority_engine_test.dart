@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vlxd_bay_hai/data/database.dart';
@@ -68,16 +71,38 @@ void main() {
   test(
     'Purchase no stock; receive 60 of 100; reject excess atomically',
     () async {
-      await apply(Operation.purchase, 'p', {
+      final ordered = await apply(Operation.purchase, 'p', {
         'supplierId': 'supplier',
         'warehouse': 'main',
-        'lines': [item(100000)],
+        'lines': [
+          {...item(100000), 'name': 'Tên do máy gửi'},
+        ],
       });
+      expect((ordered['lines'] as List).single['name'], 'Gạch');
+      final legacy = {
+        ...ordered,
+        'lines': [
+          for (final line in ordered['lines'] as List)
+            Map<String, dynamic>.from(line as Map)
+              ..remove('name')
+              ..remove('sku')
+              ..remove('unit'),
+        ],
+      };
+      await (db.update(db.businessRecords)
+            ..where((row) => row.id.equals('purchase:p')))
+          .write(BusinessRecordsCompanion(payload: Value(jsonEncode(legacy))));
       expect(await engine.stock('main', product), isEmpty);
       final r = await apply(Operation.receive, 'p', {
         'lines': [item(60000)],
       }, version: 1);
       expect(r['status'], 'partial');
+      final receipt = await engine.read('purchaseReceipt', 'p:2');
+      final line = (receipt['lines'] as List).single;
+      expect(line['name'], 'Gạch');
+      expect(line['sku'], 'A');
+      expect(line['unit'], 'viên');
+      expect(line['total'], 600000);
       expect((await engine.stock('main', product))['quantity'], 60000);
       expect((await engine.read('payable', 'supplier'))['balance'], 600000);
       await expectLater(
